@@ -3,3 +3,5 @@ import:
 - package: github.com/urfave/cli
   version: v1.18.0
 - package: gopkg.in/yaml.v2
+- package: gopkg.in/src-d/go-git.v3
+  version: v3.1.1

@@ -1,8 +1,46 @@
-hash: c0ba9571cc65e6600b4227ad5b6c81e559e7f2118021ee02f72ec4997f4b9d12
-updated: 2016-08-04T15:14:45.141185558-04:00
+hash: e9b3a16462b0796b2281d6b40b85e6de69431f66c7c20f7e1aaf2f1dd3f5bc97
+updated: 2016-09-18T02:10:12.3936052-04:00
 imports:
+- name: github.com/klauspost/compress
+  version: 08fe86a420401e830c24114bdf9f1ba91331407a
+  subpackages:
+  - zlib
+  - flate
+- name: github.com/klauspost/cpuid
+  version: 09cded8978dc9e80714c4d85b0322337b0a1e5e0
+- name: github.com/sergi/go-diff
+  version: ec7fdbb58eb3e300c8595ad5ac74a5aa50019cc7
+  subpackages:
+  - diffmatchpatch
+- name: github.com/sourcegraph/go-vcsurl
+  version: 1e4dda7d6af7dc921d42612f9aa7e7d6fd80745c
 - name: github.com/urfave/cli
   version: 1efa31f08b9333f1bd4882d61f9d668a70cd902e
+- name: golang.org/x/crypto
+  version: 81372b2fc2f10bef2a7f338da115c315a56b2726
+  subpackages:
+  - ssh
+  - curve25519
+  - ed25519
+  - ed25519/internal/edwards25519
+- name: gopkg.in/sourcegraph/go-vcsurl.v1
+  version: 6b12603ea6fd7f84b8c90118face09df39ea10c6
+- name: gopkg.in/src-d/go-git.v3
+  version: bc035e354ad328192a1e5040d84b73d93291efcb
+  subpackages:
+  - clients
+  - clients/common
+  - core
+  - diff
+  - formats/packfile
+  - storage/memory
+  - storage/seekable
+  - utils/fs
+  - clients/http
+  - clients/ssh
+  - formats/pktline
+  - storage/seekable/internal/gitdir
+  - storage/seekable/internal/index
 - name: gopkg.in/yaml.v2
   version: e4d366fc3c7938e2958e662b4258c7a89e1f0e3e
 testImports: []
