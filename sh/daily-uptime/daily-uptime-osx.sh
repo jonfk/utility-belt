@@ -17,7 +17,7 @@ DAILYUPTIMEFILE="$HOME/daily-uptime.log"
 StopService() {
     echo "Shutting Down. Logging your uptime :)"
     touch "$DAILYUPTIMEFILE"
-    echo "`date +%Y-%m-%dT%H:%M:%S%z` |`uptime`" >> "$DAILYUPTIMEFILE"
+    echo "`date +%Y-%m-%dT%H:%M:%S%z`|`uptime`" >> "$DAILYUPTIMEFILE"
     exit 0
 }
 
