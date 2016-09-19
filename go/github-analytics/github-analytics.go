@@ -10,14 +10,18 @@ import (
 	"net/http/httputil"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/urfave/cli"
 	git "gopkg.in/src-d/go-git.v3"
 )
 
 const (
-	GithubGraphqlUrl = "https://api.github.com/graphql"
+	GithubGraphqlUrl   = "https://api.github.com/graphql"
+	GithubRateLimitUrl = "https://api.github.com/rate_limit"
 )
 
 var (
@@ -44,7 +48,18 @@ func main() {
 		fmt.Printf("Total Count : %d\n", len(repositories))
 		return nil
 	}
-
+	app.Commands = []cli.Command{
+		{
+			Name:    "ratelimit",
+			Aliases: []string{},
+			Usage:   "Check the github ratelimit",
+			Action: func(c *cli.Context) error {
+				fmt.Println(c.GlobalString("token"))
+				GithubCheckRateLimit(c.GlobalString("token"))
+				return nil
+			},
+		},
+	}
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "token,t",
@@ -88,11 +103,13 @@ func getAllGithubRepositories(githubAccessToken string) []Repository {
 	firstQuery := strings.Replace(fmt.Sprintf(query, ""), "\n", "", -1)
 	githubResp := getGithubRepositoriesFromApi(githubAccessToken, firstQuery)
 
-	for githubResp.Data.Viewer.Repositories.TotalCount > 0 {
+	for len(githubResp.Data.Viewer.Repositories.Edges) > 0 {
+		spew.Dump(githubResp)
 		for _, edge := range githubResp.Data.Viewer.Repositories.Edges {
 			repositories = append(repositories, edge.Node)
 		}
 		nextQuery := strings.Replace(fmt.Sprintf(query, fmt.Sprintf("after: \"%s\"", githubResp.Data.Viewer.Repositories.PageInfo.EndCursor)), "\n", "", -1)
+		time.Sleep(5 * time.Second)
 		githubResp = getGithubRepositoriesFromApi(githubAccessToken, nextQuery)
 
 	}
@@ -123,6 +140,15 @@ func getGithubRepositoriesFromApi(githubAccessToken, query string) GithubQueryRe
 			panic(err)
 		}
 		panic(string(dump))
+	}
+
+	remaining := resp.Header.Get("X-Ratelimit-Remaining")
+	if remainingI, _ := strconv.Atoi(remaining); remainingI < 2 {
+		reset := resp.Header.Get("X-Ratelimit-Reset")
+		resetI, _ := strconv.Atoi(reset)
+		resetDate := time.Unix(int64(resetI), 0)
+		GithubCheckRateLimit(githubAccessToken)
+		panic(fmt.Sprintf("No more github API Calls until %s", resetDate))
 	}
 
 	respBody, err := ioutil.ReadAll(resp.Body)
@@ -172,6 +198,9 @@ type Repository struct {
 }
 
 func AnalyzeGithubRepo(username string, repo Repository) {
+	if repo.IsFork {
+		return
+	}
 	repoUrl := ToGithubGitHttpsUrl(username, repo.Name)
 	r, err := git.NewRepository(repoUrl, nil)
 	if err != nil {
@@ -179,7 +208,8 @@ func AnalyzeGithubRepo(username string, repo Repository) {
 	}
 
 	if err := r.PullDefault(); err != nil {
-		panic(err)
+		return
+		//panic(err)
 	}
 
 	iter, err := r.Commits()
@@ -205,7 +235,7 @@ func AnalyzeGithubRepo(username string, repo Repository) {
 	}
 	sort.Sort(ByTime(commits))
 	// TODO complete analysis print the commit properly and something smarter with frequency and recent commits
-	fmt.Printf("%s %s %t First Commit : %s Last: %s \n", repo.Name, repo.Description, repo.IsFork, commits[0].String(), commits[len(commits)-1].String())
+	fmt.Printf("* %s\n\t* %s\n\t* %s\n\t* Commits:\n\t\t* First %s\n\t\t* Last %s\n", repo.Name, repoUrl, repo.Description, commits[0].Author.When, commits[len(commits)-1].Author.When.String())
 }
 
 func ToGithubGitHttpsUrl(username, repoName string) string {
@@ -249,4 +279,60 @@ func FetchRepositoriesFromNetOrFile(token string) []Repository {
 		return repositories
 
 	}
+}
+
+func GithubCheckRateLimit(token string) GithubRateLimitModel {
+	req, err := http.NewRequest("GET", GithubRateLimitUrl, nil)
+	if err != nil {
+		panic(err)
+	}
+	if token != "" {
+		req.Header.Add("Authorization", fmt.Sprintf("bearer %s", token))
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		panic(err)
+	}
+
+	if resp.StatusCode != 200 {
+		dump, err := httputil.DumpResponse(resp, true)
+		if err != nil {
+			panic(err)
+		}
+		panic(string(dump))
+	}
+
+	rateLimitBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	rateLimit := GithubRateLimitModel{}
+	err = json.Unmarshal(rateLimitBytes, &rateLimit)
+	if err != nil {
+		panic(err)
+	}
+	spew.Dump(rateLimit)
+	return rateLimit
+}
+
+type GithubRateLimitModel struct {
+	Resources struct {
+		Core struct {
+			Limit     int `json:"limit"`
+			Remaining int `json:"remaining"`
+			Reset     int `json:"reset"`
+		} `json:"core"`
+		Search struct {
+			Limit     int `json:"limit"`
+			Remaining int `json:"remaining"`
+			Reset     int `json:"reset"`
+		} `json:"search"`
+		Graphql struct {
+			Limit     int `json:"limit"`
+			Remaining int `json:"remaining"`
+			Reset     int `json:"reset"`
+		} `json:"graphql"`
+	} `json:"resources"`
 }
