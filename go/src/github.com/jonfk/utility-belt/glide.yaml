@@ -9,3 +9,14 @@ import:
   version: v1.0.0
   subpackages:
   - spew
+- package: github.com/klauspost/crc32
+  version: v1.0
+- package: golang.org/x/net
+  subpackages:
+  - context
+- package: golang.org/x/text
+  subpackages:
+  - encoding
+- package: golang.org/x/tools
+  subpackages:
+  - go/buildutil
