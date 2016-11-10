@@ -1,0 +1,3 @@
+[submodule "rust/password-generator-rs"]
+	path = rust/password-generator-rs
+	url = git@github.com:jonfk/password-generator-rs.git
