@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +17,13 @@ import (
 const (
 	DateLayout = "2006-01-02"
 )
+
+var errOut *log.Logger
+
+func init() {
+	errOut = log.New(os.Stderr, "", 0)
+
+}
 
 func main() {
 	app := cli.NewApp()
@@ -42,6 +53,9 @@ func main() {
 			Aliases: []string{"c"},
 			Usage:   "commit file with day and date",
 			Action: func(c *cli.Context) error {
+				if len(c.Args()) < 1 {
+					return fmt.Errorf("No argument")
+				}
 				file := c.Args().First()
 				day, err := parseDate(file)
 				if err != nil {
@@ -52,6 +66,45 @@ func main() {
 				if err != nil {
 					fmt.Println(err)
 					return err
+				}
+
+				return nil
+			},
+		},
+		{
+			Name:    "rename",
+			Aliases: []string{"r"},
+			Usage:   "rename files with the wrong format in current directory",
+			Flags: []cli.Flag{cli.BoolFlag{
+				Name:  "dry-run,d",
+				Usage: "Do a dry run",
+			}},
+			Action: func(c *cli.Context) error {
+				files, err := ioutil.ReadDir(".")
+				if err != nil {
+					return err
+				}
+				if c.Bool("dry-run") {
+					fmt.Println("Running dry run")
+				}
+
+				for _, file := range files {
+					if matched, _ := regexp.MatchString(`\d\d\d\d`, file.Name()[:4]); !matched {
+						continue
+					}
+					if matched, _ := regexp.MatchString(`\d\d\d\d-\d\d-\d\d.*\.md`, file.Name()); !matched {
+						var newFileName bytes.Buffer
+						for i, c := range file.Name() {
+							if i == 4 || i == 6 {
+								newFileName.WriteString("-")
+							}
+							newFileName.WriteRune(c)
+						}
+						fmt.Printf("Renaming %s to %s\n", file.Name(), newFileName.String())
+						if !c.Bool("dry-run") {
+							os.Rename(file.Name(), newFileName.String())
+						}
+					}
 				}
 
 				return nil

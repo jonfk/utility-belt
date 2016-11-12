@@ -4,6 +4,7 @@ export GOPATH=$(shell pwd)
 .PHONY: install build clean get-deps
 
 build:
+	@go version
 	go install github.com/jonfk/utility-belt/basic-auth
 	go install github.com/jonfk/utility-belt/day-of-year
 	go install github.com/jonfk/utility-belt/github-analytics
