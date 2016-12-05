@@ -17,13 +17,13 @@ DAILYUPTIMEFILE="$HOME/daily-uptime.log"
 
 StartService() {
     echo "starting logging your uptime"
-    printf '"%s",' `date +%Y-%m-%dT%H:%M:%S%z` >> "$DAILYUPTIMEFILE"
+    printf '"%s",' "`date +%Y-%m-%dT%H:%M:%S%z`" >> "$DAILYUPTIMEFILE"
 }
 
 StopService() {
     echo "Shutting Down. Logging your uptime :)"
     touch "$DAILYUPTIMEFILE"
-    printf '"%s","%s","%s"\n' "`date +%Y-%m-%dT%H:%M:%S%z`" "`uptime`" "`sysctl -n kern.boottime`" >> "$DAILYUPTIMEFILE"
+    printf '"%s","%s","%s","%s"\n' "`date +%Y-%m-%dT%H:%M:%S%z`" "`uptime`" "`sysctl -n kern.boottime`" "`date +%s`" >> "$DAILYUPTIMEFILE"
     exit 0
 }
 
