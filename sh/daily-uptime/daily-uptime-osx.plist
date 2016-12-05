@@ -5,7 +5,7 @@
 		<key>Label</key>
 		<string>com.jonfk.uptime-log-osx</string>
 		<key>Program</key>
-		<string>/Users/jonathan.fokkan/Applications/daily-uptime-osx.sh</string>
+		<string>/Users/YOUR_USERNAME/Applications/daily-uptime-osx.sh</string>
 		<key>RunAtLoad</key>
 		<true/>
 	</dict>
