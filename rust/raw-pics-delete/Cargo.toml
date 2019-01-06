@@ -1,0 +1,10 @@
+[package]
+name = "raw-pics-delete"
+version = "0.1.0"
+authors = ["Jonathan Fok kan <jfokkan@gmail.com>"]
+
+[dependencies]
+clap = "2.32.0"
+log = "0.4.6"
+env_logger = "0.6.0"
+failure = "0.1.3"
