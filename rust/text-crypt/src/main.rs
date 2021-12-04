@@ -1,8 +1,10 @@
 use std::fmt;
 use std::fs;
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
 
 use base64;
-use base64::write;
 use chacha20poly1305::aead::{Aead, NewAead};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use clap::{App, Arg, SubCommand};
@@ -25,39 +27,60 @@ fn main() {
                 .multiple(true)
                 .help("Sets the level of verbosity"),
         )
-        .arg(
-            Arg::with_name("password")
-                .env("PASS")
-                .short("p")
-                .required(true)
-                .help("password to be used"),
-        )
-        .arg(
-            Arg::with_name("encrypt")
-                .short("e")
-                .help("Sets encryption mode"),
-        )
-        .arg(
-            Arg::with_name("decrypt")
-                .short("d")
-                .help("Sets decryption mode"),
-        )
         .subcommand(
             SubCommand::with_name("encrypt")
                 .aliases(&["e", "enc"])
                 .about("Encrypt files containing \"---BEGIN CRYPT---\"")
                 .arg(
+                    Arg::with_name("password")
+                        .env("PASS")
+                        .short("p")
+                        .required(true)
+                        .help("password to be used"),
+                )
+                .arg(
                     Arg::with_name("INPUT")
-                        .help("Sets the input file to use")
+                        .help("Path to the file to encrypt")
                         .required(true)
                         .index(1),
+                )
+                .arg(
+                    Arg::with_name("write")
+                        .short("w")
+                        .help("Write the result to the input file")
+                        .takes_value(false),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("decrypt")
+                .aliases(&["d", "dec"])
+                .about("Decrypt files containing \"---BEGIN CRYPT---\"")
+                .arg(
+                    Arg::with_name("password")
+                        .env("PASS")
+                        .short("p")
+                        .required(true)
+                        .help("password to be used"),
+                )
+                .arg(
+                    Arg::with_name("write")
+                        .short("w")
+                        .help("Write the result to the input file")
+                        .takes_value(false),
+                )
+                .arg(
+                    Arg::with_name("files")
+                        .help("Path to the files or directory to encrypt")
+                        .required(true)
+                        .min_values(1),
                 ),
         )
         .get_matches();
 
-    let password = matches.value_of("password").expect("password is required");
-
     if let Some(enc_matches) = matches.subcommand_matches("encrypt") {
+        let password = enc_matches
+            .value_of("password")
+            .expect("password is required");
         let filename = enc_matches.value_of("INPUT").expect("INPUT is required");
         let contents = fs::read_to_string(filename).expect(&format!("Error reading {}", filename));
         let mut crypt_file = parse_file(filename, &contents);
@@ -83,6 +106,57 @@ fn main() {
 
         crypt_file.blocks = encrypted_crypt_blocks;
 
+        if enc_matches.is_present("write") {
+            let mut file = File::create(filename).expect("create file");
+            write!(file, "{}", crypt_file).expect("write file");
+        } else {
+            println!("{}", crypt_file);
+        }
+    }
+
+    if let Some(dec_matches) = matches.subcommand_matches("decrypt") {
+        let password = dec_matches
+            .value_of("password")
+            .expect("password is required");
+        let files: Vec<_> = dec_matches.values_of("files").unwrap().collect();
+
+        for file_path in files {
+            let path = Path::new(&file_path);
+            if path.is_dir() {
+                todo!()
+            } else {
+                decrypt_file(dec_matches.is_present("write"), password, path);
+            }
+        }
+    }
+}
+
+fn decrypt_file(write: bool, password: &str, filepath: &Path) {
+    let contents =
+        fs::read_to_string(filepath).expect(&format!("Error reading {}", filepath.display()));
+    let mut crypt_file = parse_file(&filepath, &contents);
+
+    let unencrypted_blocks: Vec<_> = crypt_file
+        .blocks
+        .into_iter()
+        .map(|mut block| match block {
+            Block::Plaintext(_) => block,
+            Block::Crypt(ref mut crypt_block) => {
+                if crypt_block.is_encrypted() {
+                    let decrypted_text = decrypt(password, &crypt_block);
+                    Block::Crypt(CryptBlock::new_unencrypted(&decrypted_text))
+                } else {
+                    block
+                }
+            }
+        })
+        .collect();
+
+    crypt_file.blocks = unencrypted_blocks;
+    if write {
+        let mut file = File::create(filepath).expect("create file");
+        write!(file, "{}", crypt_file).expect("write file");
+    } else {
         println!("{}", crypt_file);
     }
 }
@@ -178,6 +252,13 @@ impl CryptBlock {
     fn has_algorithm_and_nonce(&self) -> bool {
         self.algorithm.is_some() && self.nonce.is_some()
     }
+
+    fn new_unencrypted(txt: &str) -> Self {
+        CryptBlock {
+            ciphertext: txt.to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Error, Debug)]
@@ -186,7 +267,8 @@ enum CryptError {
     Unknown,
 }
 
-fn parse_file(filepath: &str, contents: &str) -> CryptFile {
+fn parse_file<T: AsRef<Path>>(filepath: T, contents: &str) -> CryptFile {
+    let filepath = filepath.as_ref().to_string_lossy();
     let mut current = String::new();
     let mut current_crypt_block = None;
     let mut blocks = Vec::new();
@@ -215,7 +297,7 @@ fn parse_file(filepath: &str, contents: &str) -> CryptFile {
                     panic!("Multiple headers in same crypt block. file: {}", filepath);
                 }
                 current_crypt_block.algorithm = Some(header[0].to_string());
-                current_crypt_block.nonce = Some(header[1].to_string());
+                current_crypt_block.nonce = Some(header[1].trim().to_string());
             } else {
                 panic!(
                     "END CRYPT HEADER without matching start. file: {}",
@@ -228,7 +310,7 @@ fn parse_file(filepath: &str, contents: &str) -> CryptFile {
                 panic!("Crypt block is empty. file: {}", filepath);
             }
             if let Some(mut current_crypt_block) = current_crypt_block {
-                current_crypt_block.ciphertext = current;
+                current_crypt_block.ciphertext = current.trim_end().to_string();
                 blocks.push(Block::Crypt(current_crypt_block));
             } else {
                 panic!("END CRYPT without matching start. file: {}", filepath);
