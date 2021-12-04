@@ -1,4 +1,19 @@
+pub mod cli;
+pub mod crypto;
 pub mod parse;
+
+use std::fmt;
+
+use std::{fs::File, io::Write};
+
+use base64;
+use chacha20poly1305::{
+    aead::{Aead, NewAead},
+    ChaCha20Poly1305, Key, Nonce,
+};
+use clap::{App, Arg, SubCommand};
+use thiserror::Error;
+use walkdir::WalkDir;
 
 static START_DELIMITER: &'static str = "---BEGIN CRYPT---";
 static END_HEADER_DELIMITER: &'static str = "---END CRYPT HEADER---";
@@ -12,7 +27,7 @@ enum Block {
     Crypt(CryptBlock),
 }
 
-struct CryptFile {
+pub struct CryptFile {
     blocks: Vec<Block>,
 }
 
@@ -48,7 +63,7 @@ impl fmt::Display for CryptFile {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct CryptBlock {
+pub struct CryptBlock {
     algorithm: Option<String>,
     nonce: Option<String>,
     ciphertext: String,
