@@ -1,16 +1,14 @@
-use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::{fs, path::PathBuf};
 
 use clap::{App, Arg, SubCommand};
 use walkdir::{DirEntry, WalkDir};
 
-use crate::{
-    crypto::{decrypt, encrypt},
-    Block, CheckError, CheckErrors, CryptBlock,
-};
-use crate::{CryptFile, EncryptError, EncryptErrors};
+use crate::CryptFile;
+use crate::{Block, CheckError, CheckErrors};
+
+mod decrypt;
+mod encrypt;
 
 pub fn run() {
     let matches = App::new("text-crypt")
@@ -85,165 +83,21 @@ pub fn run() {
         let paths: Vec<_> = enc_matches.values_of("INPUT").unwrap().collect();
         let write_file = enc_matches.is_present("write");
 
-        encrypt_cmd(password, write_file, paths).expect("encrypt");
+        encrypt::encrypt_cmd(password, write_file, paths).expect("encrypt");
     } else if let Some(dec_matches) = matches.subcommand_matches("decrypt") {
         let password = dec_matches
             .value_of("password")
             .expect("password is required");
-        let files: Vec<_> = dec_matches.values_of("files").unwrap().collect();
-        let should_write = dec_matches.is_present("write");
-        let should_print_filename = files.len() > 1;
+        let paths: Vec<_> = dec_matches.values_of("files").unwrap().collect();
+        let write_file = dec_matches.is_present("write");
 
-        for file_path in files {
-            let path = Path::new(&file_path);
-            if path.is_dir() {
-                for entry in walk_dir(path) {
-                    let dir_entry = entry.expect("read entry");
-                    if dir_entry.path().is_file() {
-                        decrypt_file(should_write, password, dir_entry.path(), true);
-                    }
-                }
-            } else {
-                decrypt_file(should_write, password, path, should_print_filename);
-            }
-        }
+        decrypt::decrypt_cmd(write_file, password, paths);
     } else if let Some(check_matches) = matches.subcommand_matches("check") {
         let files: Vec<_> = check_matches
             .values_of("files")
             .unwrap_or_default()
             .collect();
         check_cmd(files).expect("check_files");
-    }
-}
-
-fn encrypt_cmd(password: &str, write_file: bool, paths: Vec<&str>) -> Result<(), EncryptErrors> {
-    let paths = if paths.is_empty() {
-        vec![std::env::current_dir().map_err(|e| EncryptErrors {
-            errors: vec![EncryptError::ReadFile(
-                "current working directory".to_string(),
-                e,
-            )],
-        })?]
-    } else {
-        paths.into_iter().map(|s| PathBuf::from(s)).collect()
-    };
-    let errors: Vec<_> = paths
-        .into_iter()
-        .flat_map(|path| {
-            if path.is_dir() {
-                encrypt_dir(password, write_file, &path)
-            } else {
-                vec![encrypt_file(password, write_file, path)]
-            }
-        })
-        .filter_map(|res| match res {
-            Ok(_) => None,
-            Err(e) => Some(e),
-        })
-        .collect();
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(EncryptErrors { errors })
-    }
-}
-
-fn encrypt_dir(password: &str, write_file: bool, path: &Path) -> Vec<Result<(), EncryptError>> {
-    walk_dir(path)
-        .map(|direntry| {
-            let entry =
-                direntry.map_err(|e| EncryptError::WalkDir(format!("{}", path.display()), e))?;
-            let entry_path = entry.path();
-            if entry_path.is_file() {
-                encrypt_file(password, write_file, entry_path)?;
-            }
-            Ok(())
-        })
-        .collect()
-}
-
-fn encrypt_file<P: AsRef<Path>>(
-    password: &str,
-    should_write: bool,
-    path: P,
-) -> Result<(), EncryptError> {
-    let filename = format!("{}", path.as_ref().display());
-    let contents = fs::read_to_string(path.as_ref())
-        .map_err(|e| EncryptError::ReadFile(filename.clone(), e))?;
-
-    if !CryptFile::is_crypt_file(&contents) {
-        return Ok(());
-    }
-    let mut crypt_file = CryptFile::from_str(&contents)
-        .map_err(|e| EncryptError::ParseCryptFile(filename.clone(), e))?;
-
-    let encrypted_crypt_blocks: Vec<_> = crypt_file
-        .blocks
-        .into_iter()
-        .map(|mut block| match block {
-            Block::Crypt(ref mut crypt_block) => {
-                if crypt_block.is_encrypted() {
-                    block
-                } else {
-                    let encrypted_block = encrypt(password, &crypt_block.ciphertext);
-                    crypt_block.algorithm = encrypted_block.algorithm;
-                    crypt_block.nonce = encrypted_block.nonce;
-                    crypt_block.ciphertext = encrypted_block.ciphertext;
-                    block
-                }
-            }
-            Block::Plaintext(_) => block,
-        })
-        .collect();
-
-    crypt_file.blocks = encrypted_crypt_blocks;
-
-    if should_write {
-        let mut file = File::create(path.as_ref())
-            .map_err(|e| EncryptError::WriteFile(filename.to_string(), e))?;
-        write!(file, "{}", crypt_file)
-            .map_err(|e| EncryptError::WriteFile(filename.to_string(), e))?;
-    } else {
-        println!("{}", crypt_file);
-    }
-    Ok(())
-}
-
-fn decrypt_file(write: bool, password: &str, filepath: &Path, should_print_filename: bool) {
-    let contents =
-        fs::read_to_string(filepath).expect(&format!("Error reading {}", filepath.display()));
-
-    if CryptFile::is_crypt_file(&contents) {
-        return;
-    }
-    let mut crypt_file = CryptFile::from_str(&contents).expect("parse failed");
-
-    let unencrypted_blocks: Vec<_> = crypt_file
-        .blocks
-        .into_iter()
-        .map(|mut block| match block {
-            Block::Plaintext(_) => block,
-            Block::Crypt(ref mut crypt_block) => {
-                if crypt_block.is_encrypted() {
-                    let decrypted_text = decrypt(password, &crypt_block);
-                    Block::Crypt(CryptBlock::new_unencrypted(&decrypted_text))
-                } else {
-                    block
-                }
-            }
-        })
-        .collect();
-
-    crypt_file.blocks = unencrypted_blocks;
-    if write {
-        let mut file = File::create(filepath).expect("create file");
-        write!(file, "{}", crypt_file).expect("write file");
-    } else {
-        if should_print_filename {
-            println!("{}", filepath.display());
-        }
-        println!("{}", crypt_file);
     }
 }
 
