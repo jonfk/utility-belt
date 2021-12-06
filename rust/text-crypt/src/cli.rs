@@ -10,7 +10,7 @@ use crate::{
     crypto::{decrypt, encrypt},
     Block, CheckError, CheckErrors, CryptBlock,
 };
-use crate::{CryptFile, EncryptError};
+use crate::{CryptFile, EncryptError, EncryptErrors};
 
 pub fn run() {
     let matches = App::new("text-crypt")
@@ -82,11 +82,10 @@ pub fn run() {
         let password = enc_matches
             .value_of("password")
             .expect("password is required");
-        let filename = enc_matches.value_of("INPUT").expect("INPUT is required");
-        let contents = fs::read_to_string(filename).expect(&format!("Error reading {}", filename));
-        let should_write = enc_matches.is_present("write");
+        let paths: Vec<_> = enc_matches.values_of("INPUT").unwrap().collect();
+        let write_file = enc_matches.is_present("write");
 
-        encrypt_file(password, should_write, filename, &contents);
+        encrypt_cmd(password, write_file, paths).expect("encrypt");
     } else if let Some(dec_matches) = matches.subcommand_matches("decrypt") {
         let password = dec_matches
             .value_of("password")
@@ -98,7 +97,7 @@ pub fn run() {
         for file_path in files {
             let path = Path::new(&file_path);
             if path.is_dir() {
-                for entry in WalkDir::new(path) {
+                for entry in walk_dir(path) {
                     let dir_entry = entry.expect("read entry");
                     if dir_entry.path().is_file() {
                         decrypt_file(should_write, password, dir_entry.path(), true);
@@ -117,15 +116,67 @@ pub fn run() {
     }
 }
 
-fn encrypt_cmd(password: &str, write_to_file: bool, paths: Vec<&str>) -> Result<(), EncryptError> {
-    todo!()
+fn encrypt_cmd(password: &str, write_file: bool, paths: Vec<&str>) -> Result<(), EncryptErrors> {
+    let paths = if paths.is_empty() {
+        vec![std::env::current_dir().map_err(|e| EncryptErrors {
+            errors: vec![EncryptError::ReadFile(
+                "current working directory".to_string(),
+                e,
+            )],
+        })?]
+    } else {
+        paths.into_iter().map(|s| PathBuf::from(s)).collect()
+    };
+    let errors: Vec<_> = paths
+        .into_iter()
+        .flat_map(|path| {
+            if path.is_dir() {
+                encrypt_dir(password, write_file, &path)
+            } else {
+                vec![encrypt_file(password, write_file, path)]
+            }
+        })
+        .filter_map(|res| match res {
+            Ok(_) => None,
+            Err(e) => Some(e),
+        })
+        .collect();
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(EncryptErrors { errors })
+    }
 }
 
-fn encrypt_file(password: &str, should_write: bool, filename: &str, contents: &str) {
-    if !CryptFile::is_crypt_file(contents) {
-        return;
+fn encrypt_dir(password: &str, write_file: bool, path: &Path) -> Vec<Result<(), EncryptError>> {
+    walk_dir(path)
+        .map(|direntry| {
+            let entry =
+                direntry.map_err(|e| EncryptError::WalkDir(format!("{}", path.display()), e))?;
+            let entry_path = entry.path();
+            if entry_path.is_file() {
+                encrypt_file(password, write_file, entry_path)?;
+            }
+            Ok(())
+        })
+        .collect()
+}
+
+fn encrypt_file<P: AsRef<Path>>(
+    password: &str,
+    should_write: bool,
+    path: P,
+) -> Result<(), EncryptError> {
+    let filename = format!("{}", path.as_ref().display());
+    let contents = fs::read_to_string(path.as_ref())
+        .map_err(|e| EncryptError::ReadFile(filename.clone(), e))?;
+
+    if !CryptFile::is_crypt_file(&contents) {
+        return Ok(());
     }
-    let mut crypt_file = CryptFile::parse_file(filename, &contents).expect("parse failed");
+    let mut crypt_file = CryptFile::from_str(&contents)
+        .map_err(|e| EncryptError::ParseCryptFile(filename.clone(), e))?;
 
     let encrypted_crypt_blocks: Vec<_> = crypt_file
         .blocks
@@ -149,11 +200,14 @@ fn encrypt_file(password: &str, should_write: bool, filename: &str, contents: &s
     crypt_file.blocks = encrypted_crypt_blocks;
 
     if should_write {
-        let mut file = File::create(filename).expect("create file");
-        write!(file, "{}", crypt_file).expect("write file");
+        let mut file = File::create(path.as_ref())
+            .map_err(|e| EncryptError::WriteFile(filename.to_string(), e))?;
+        write!(file, "{}", crypt_file)
+            .map_err(|e| EncryptError::WriteFile(filename.to_string(), e))?;
     } else {
         println!("{}", crypt_file);
     }
+    Ok(())
 }
 
 fn decrypt_file(write: bool, password: &str, filepath: &Path, should_print_filename: bool) {
@@ -163,7 +217,7 @@ fn decrypt_file(write: bool, password: &str, filepath: &Path, should_print_filen
     if CryptFile::is_crypt_file(&contents) {
         return;
     }
-    let mut crypt_file = CryptFile::parse_file(&filepath, &contents).expect("parse failed");
+    let mut crypt_file = CryptFile::from_str(&contents).expect("parse failed");
 
     let unencrypted_blocks: Vec<_> = crypt_file
         .blocks
@@ -209,9 +263,7 @@ fn check_cmd(files: Vec<&str>) -> Result<(), CheckErrors> {
         .flat_map(|input_path| {
             let path = Path::new(&input_path);
             if path.is_dir() {
-                WalkDir::new(path)
-                    .into_iter()
-                    .filter_entry(|e| !is_hidden_or_binary(e))
+                walk_dir(path)
                     .map(|entry_res| {
                         let entry = entry_res
                             .map_err(|e| CheckError::WalkDir(format!("{}", path.display()), e))?;
@@ -246,7 +298,7 @@ fn check_file(file_path: &Path) -> Result<(), CheckError> {
     if !CryptFile::is_crypt_file(&contents) {
         return Ok(());
     }
-    let crypt_file = CryptFile::parse_file(&file_path, &contents)
+    let crypt_file = CryptFile::from_str(&contents)
         .map_err(|e| CheckError::ParseCryptFile(format!("{}", file_path.display()), e))?;
     if crypt_file
         .blocks
@@ -264,6 +316,14 @@ fn check_file(file_path: &Path) -> Result<(), CheckError> {
         )));
     }
     Ok(())
+}
+
+fn walk_dir<P: AsRef<Path>>(
+    path: P,
+) -> walkdir::FilterEntry<walkdir::IntoIter, fn(&DirEntry) -> bool> {
+    WalkDir::new(path)
+        .into_iter()
+        .filter_entry(|e| !is_hidden_or_binary(e))
 }
 
 fn is_hidden_or_binary(entry: &DirEntry) -> bool {

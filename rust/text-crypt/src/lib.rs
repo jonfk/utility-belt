@@ -4,16 +4,8 @@ pub mod parse;
 
 use std::fmt;
 
-use std::{fs::File, io::Write};
-
 use base64;
-use chacha20poly1305::{
-    aead::{Aead, NewAead},
-    ChaCha20Poly1305, Key, Nonce,
-};
-use clap::{App, Arg, SubCommand};
 use thiserror::Error;
-use walkdir::WalkDir;
 
 static START_DELIMITER: &'static str = "---BEGIN CRYPT---";
 static END_HEADER_DELIMITER: &'static str = "---END CRYPT HEADER---";
@@ -107,6 +99,7 @@ enum CheckError {
     ParseCryptFile(String, ParseError),
 }
 
+// TODO implement Debug manually
 #[derive(Debug)]
 struct CheckErrors {
     errors: Vec<CheckError>,
@@ -114,13 +107,21 @@ struct CheckErrors {
 
 #[derive(Error, Debug)]
 enum EncryptError {
+    #[error("Error parsing file: {} Error: {}", .0, .1)]
+    ParseCryptFile(String, ParseError),
+
     #[error("Error reading file: {} Error: {}", .0, .1)]
     ReadFile(String, std::io::Error),
+
+    #[error("Error writing file: {} Error: {}", .0, .1)]
+    WriteFile(String, std::io::Error),
 
     #[error("Error walking dir: {} Error: {}", .0, .1)]
     WalkDir(String, walkdir::Error),
 }
 
+// TODO implement Debug manually
+#[derive(Debug)]
 struct EncryptErrors {
     errors: Vec<EncryptError>,
 }

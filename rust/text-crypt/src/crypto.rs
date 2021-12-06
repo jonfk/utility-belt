@@ -1,7 +1,6 @@
 use base64;
 use chacha20poly1305::aead::{Aead, NewAead};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use thiserror::Error;
 
 use crate::CryptBlock;
 use crate::BASE64_CONFIG;
@@ -10,8 +9,8 @@ pub fn encrypt(password: &str, contents: &str) -> CryptBlock {
     let key = Key::from_slice(password.as_bytes()); // 32-bytes
     let cipher = ChaCha20Poly1305::new(key);
 
-    let nonce_str = "unique nonce";
-    let nonce = Nonce::from_slice(nonce_str.as_bytes()); // 12-bytes; unique per message
+    let nonce_bytes = generate_random_nonce();
+    let nonce = Nonce::from_slice(&nonce_bytes); // 12-bytes; unique per message
 
     let ciphertext_bytes = cipher
         .encrypt(nonce, contents.as_bytes().as_ref())
@@ -20,9 +19,19 @@ pub fn encrypt(password: &str, contents: &str) -> CryptBlock {
     let ciphertext = base64::encode_config(ciphertext_bytes, BASE64_CONFIG);
     CryptBlock {
         algorithm: Some("ChaCha20Poly1305".to_string()),
-        nonce: Some(nonce_str.to_string()),
+        nonce: Some(base64::encode_config(nonce_bytes, BASE64_CONFIG)),
         ciphertext,
     }
+}
+
+fn generate_random_nonce() -> [u8; 12] {
+    use rand::prelude::*;
+    use rand_chacha::ChaCha20Rng;
+
+    let mut rng = ChaCha20Rng::from_entropy();
+    let mut nonce: [u8; 12] = [0; 12];
+    rng.fill(&mut nonce);
+    nonce
 }
 
 pub fn decrypt(password: &str, encrypted: &CryptBlock) -> String {

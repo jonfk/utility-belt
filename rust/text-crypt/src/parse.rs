@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use crate::Block;
 use crate::CryptBlock;
 use crate::ParseError;
@@ -12,11 +10,7 @@ impl CryptFile {
         contents.contains(START_DELIMITER.trim_matches('-'))
     }
 
-    pub fn parse_file<T: AsRef<Path>>(
-        filepath: T,
-        contents: &str,
-    ) -> Result<CryptFile, ParseError> {
-        let filepath = filepath.as_ref().to_string_lossy();
+    pub fn from_str(contents: &str) -> Result<CryptFile, ParseError> {
         let mut current = String::new();
         let mut current_crypt_block = None;
         let mut blocks = Vec::new();
@@ -93,7 +87,7 @@ hello
 blahblahblah
 "#;
 
-    let crypt_file = CryptFile::parse_file("file_path", &contents).unwrap();
+    let crypt_file = CryptFile::from_str(&contents).unwrap();
     assert_eq!(crypt_file.blocks.len(), 3);
     assert_eq!(
         crypt_file.blocks,
