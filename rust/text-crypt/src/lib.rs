@@ -91,3 +91,20 @@ enum CryptError {
     #[error("unknown error")]
     Unknown,
 }
+
+#[derive(Error, Debug)]
+enum CheckError {
+    #[error("Unencrypted file: {}", .0)]
+    UnencryptedFile(String),
+
+    #[error("Error reading file: {} Error: {}", .0, .1)]
+    ReadFile(String, std::io::Error),
+
+    #[error("Error walking dir: {} Error: {}", .0, .1)]
+    WalkDir(String, walkdir::Error),
+}
+
+#[derive(Debug)]
+struct CheckErrors {
+    errors: Vec<CheckError>,
+}
