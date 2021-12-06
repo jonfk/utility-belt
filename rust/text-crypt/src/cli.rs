@@ -4,14 +4,13 @@ use std::path::Path;
 use std::{fs, path::PathBuf};
 
 use clap::{App, Arg, SubCommand};
-use thiserror::Error;
 use walkdir::{DirEntry, WalkDir};
 
 use crate::{
     crypto::{decrypt, encrypt},
-    parse::parse_file,
-    Block, CheckError, CheckErrors, CryptBlock, START_DELIMITER,
+    Block, CheckError, CheckErrors, CryptBlock,
 };
+use crate::{CryptFile, EncryptError};
 
 pub fn run() {
     let matches = App::new("text-crypt")
@@ -38,8 +37,7 @@ pub fn run() {
                 .arg(
                     Arg::with_name("INPUT")
                         .help("Path to the file to encrypt")
-                        .required(true)
-                        .index(1),
+                        ,
                 )
                 .arg(
                     Arg::with_name("write")
@@ -115,12 +113,19 @@ pub fn run() {
             .values_of("files")
             .unwrap_or_default()
             .collect();
-        check_files(files).expect("check_files");
+        check_cmd(files).expect("check_files");
     }
 }
 
+fn encrypt_cmd(password: &str, write_to_file: bool, paths: Vec<&str>) -> Result<(), EncryptError> {
+    todo!()
+}
+
 fn encrypt_file(password: &str, should_write: bool, filename: &str, contents: &str) {
-    let mut crypt_file = parse_file(filename, &contents);
+    if !CryptFile::is_crypt_file(contents) {
+        return;
+    }
+    let mut crypt_file = CryptFile::parse_file(filename, &contents).expect("parse failed");
 
     let encrypted_crypt_blocks: Vec<_> = crypt_file
         .blocks
@@ -155,10 +160,10 @@ fn decrypt_file(write: bool, password: &str, filepath: &Path, should_print_filen
     let contents =
         fs::read_to_string(filepath).expect(&format!("Error reading {}", filepath.display()));
 
-    if !contents.contains(START_DELIMITER) {
+    if CryptFile::is_crypt_file(&contents) {
         return;
     }
-    let mut crypt_file = parse_file(&filepath, &contents);
+    let mut crypt_file = CryptFile::parse_file(&filepath, &contents).expect("parse failed");
 
     let unencrypted_blocks: Vec<_> = crypt_file
         .blocks
@@ -188,7 +193,7 @@ fn decrypt_file(write: bool, password: &str, filepath: &Path, should_print_filen
     }
 }
 
-fn check_files(files: Vec<&str>) -> Result<(), CheckErrors> {
+fn check_cmd(files: Vec<&str>) -> Result<(), CheckErrors> {
     let files = if files.is_empty() {
         vec![std::env::current_dir().map_err(|e| CheckErrors {
             errors: vec![CheckError::ReadFile(
@@ -238,10 +243,11 @@ fn check_file(file_path: &Path) -> Result<(), CheckError> {
     let contents = fs::read_to_string(file_path)
         .map_err(|e| CheckError::ReadFile(format!("{}", file_path.display()), e))?;
 
-    if !contents.contains(START_DELIMITER) {
+    if !CryptFile::is_crypt_file(&contents) {
         return Ok(());
     }
-    let crypt_file = parse_file(&file_path, &contents);
+    let crypt_file = CryptFile::parse_file(&file_path, &contents)
+        .map_err(|e| CheckError::ParseCryptFile(format!("{}", file_path.display()), e))?;
     if crypt_file
         .blocks
         .into_iter()

@@ -102,9 +102,61 @@ enum CheckError {
 
     #[error("Error walking dir: {} Error: {}", .0, .1)]
     WalkDir(String, walkdir::Error),
+
+    #[error("Error parsing file: {} Error: {}", .0, .1)]
+    ParseCryptFile(String, ParseError),
 }
 
 #[derive(Debug)]
 struct CheckErrors {
     errors: Vec<CheckError>,
+}
+
+#[derive(Error, Debug)]
+enum EncryptError {
+    #[error("Error reading file: {} Error: {}", .0, .1)]
+    ReadFile(String, std::io::Error),
+
+    #[error("Error walking dir: {} Error: {}", .0, .1)]
+    WalkDir(String, walkdir::Error),
+}
+
+struct EncryptErrors {
+    errors: Vec<EncryptError>,
+}
+
+#[derive(Error, Debug)]
+pub enum ParseError {
+    #[error(
+        "CRYPT Header does not have right number of arguments at line {}",
+        .0
+    )]
+    InvalidHeader(usize),
+
+    #[error(
+        "A CRYPT block cannot have more than 1 header at line {}",
+        .0
+    )]
+    MultipleHeaders(usize),
+
+    #[error(
+        "A CRYPT END Header was encountered with no start at line {}",
+        .0
+    )]
+    EndHeaderWithNoStart(usize),
+
+    #[error(
+        "A empty CRYPT block was encountered at line {}",
+        .0
+    )]
+    EmptyCryptBlock(usize),
+
+    #[error(
+        "A CRYPT END was encountered with no start at line {}",
+        .0
+    )]
+    EndWithNoStart(usize),
+
+    #[error("A CRYPT START was encountered with no end")]
+    StartWithNoEnd,
 }
