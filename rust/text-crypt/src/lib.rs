@@ -5,6 +5,7 @@ pub mod parse;
 use std::fmt;
 
 use base64;
+use crypto::{CryptoDecryptError, CryptoEncryptError};
 use thiserror::Error;
 
 static START_DELIMITER: &'static str = "---BEGIN CRYPT---";
@@ -79,12 +80,6 @@ impl CryptBlock {
 }
 
 #[derive(Error, Debug)]
-enum CryptError {
-    #[error("unknown error")]
-    Unknown,
-}
-
-#[derive(Error, Debug)]
 enum CheckError {
     #[error("Unencrypted file: {}", .0)]
     UnencryptedFile(String),
@@ -118,12 +113,37 @@ enum EncryptError {
 
     #[error("Error walking dir: {} Error: {}", .0, .1)]
     WalkDir(String, walkdir::Error),
+
+    #[error(transparent)]
+    Encryption(#[from] CryptoEncryptError),
 }
 
 // TODO implement Debug manually
 #[derive(Debug)]
 struct EncryptErrors {
     errors: Vec<EncryptError>,
+}
+
+#[derive(Error, Debug)]
+enum DecryptError {
+    #[error("Error parsing file: {} Error: {}", .0, .1)]
+    ParseCryptFile(String, ParseError),
+
+    #[error("Error reading file: {} Error: {}", .0, .1)]
+    ReadFile(String, std::io::Error),
+
+    #[error("Error writing file: {} Error: {}", .0, .1)]
+    WriteFile(String, std::io::Error),
+
+    #[error("Error walking dir: {} Error: {}", .0, .1)]
+    WalkDir(String, walkdir::Error),
+    #[error(transparent)]
+    Decryption(#[from] CryptoDecryptError),
+}
+
+#[derive(Debug)]
+struct DecryptErrors {
+    errors: Vec<DecryptError>,
 }
 
 #[derive(Error, Debug)]

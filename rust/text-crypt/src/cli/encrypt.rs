@@ -62,6 +62,7 @@ fn encrypt_dir(password: &str, write_file: bool, path: &Path) -> Vec<Result<(), 
 fn encrypt_file<P: AsRef<Path>>(
     password: &str,
     should_write: bool,
+
     path: P,
 ) -> Result<(), EncryptError> {
     let filename = format!("{}", path.as_ref().display());
@@ -74,26 +75,26 @@ fn encrypt_file<P: AsRef<Path>>(
     let mut crypt_file = CryptFile::from_str(&contents)
         .map_err(|e| EncryptError::ParseCryptFile(filename.clone(), e))?;
 
-    let encrypted_crypt_blocks: Vec<_> = crypt_file
+    let encrypted_crypt_blocks: Result<Vec<_>, EncryptError> = crypt_file
         .blocks
         .into_iter()
         .map(|mut block| match block {
             Block::Crypt(ref mut crypt_block) => {
                 if crypt_block.is_encrypted() {
-                    block
+                    Ok(block)
                 } else {
-                    let encrypted_block = encrypt(password, &crypt_block.ciphertext);
+                    let encrypted_block = encrypt(password, &crypt_block.ciphertext)?;
                     crypt_block.algorithm = encrypted_block.algorithm;
                     crypt_block.nonce = encrypted_block.nonce;
                     crypt_block.ciphertext = encrypted_block.ciphertext;
-                    block
+                    Ok(block)
                 }
             }
-            Block::Plaintext(_) => block,
+            Block::Plaintext(_) => Ok(block),
         })
         .collect();
 
-    crypt_file.blocks = encrypted_crypt_blocks;
+    crypt_file.blocks = encrypted_crypt_blocks?;
 
     if should_write {
         let mut file = File::create(path.as_ref())

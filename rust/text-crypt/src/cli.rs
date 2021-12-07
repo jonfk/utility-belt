@@ -91,7 +91,7 @@ pub fn run() {
         let paths: Vec<_> = dec_matches.values_of("files").unwrap().collect();
         let write_file = dec_matches.is_present("write");
 
-        decrypt::decrypt_cmd(write_file, password, paths);
+        decrypt::decrypt_cmd(write_file, password, paths).expect("decrypt");
     } else if let Some(check_matches) = matches.subcommand_matches("check") {
         let files: Vec<_> = check_matches
             .values_of("files")
