@@ -63,9 +63,7 @@ pub fn run() {
                 )
                 .arg(
                     Arg::with_name("files")
-                        .help("Path to the files or directory to encrypt")
-                        .required(true)
-                        .min_values(1),
+                        .help("Path to the files or directory to encrypt"),
                 ),
         )
         .subcommand(
@@ -80,7 +78,7 @@ pub fn run() {
         let password = enc_matches
             .value_of("password")
             .expect("password is required");
-        let paths: Vec<_> = enc_matches.values_of("INPUT").unwrap().collect();
+        let paths: Vec<_> = enc_matches.values_of("INPUT").unwrap_or_default().collect();
         let write_file = enc_matches.is_present("write");
 
         encrypt::encrypt_cmd(password, write_file, paths).expect("encrypt");
@@ -88,7 +86,7 @@ pub fn run() {
         let password = dec_matches
             .value_of("password")
             .expect("password is required");
-        let paths: Vec<_> = dec_matches.values_of("files").unwrap().collect();
+        let paths: Vec<_> = dec_matches.values_of("files").unwrap_or_default().collect();
         let write_file = dec_matches.is_present("write");
 
         decrypt::decrypt_cmd(write_file, password, paths).expect("decrypt");

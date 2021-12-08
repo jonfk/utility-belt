@@ -74,7 +74,8 @@ fn decrypt_file(
     let contents =
         fs::read_to_string(filepath).map_err(|e| DecryptError::ReadFile(filename.clone(), e))?;
 
-    if CryptFile::is_crypt_file(&contents) {
+    if !CryptFile::is_crypt_file(&contents) {
+        eprintln!("Skipping decrypting {} since not a Crypt File", filename);
         return Ok(());
     }
     let mut crypt_file = CryptFile::from_str(&contents)

@@ -20,6 +20,7 @@ enum Block {
     Crypt(CryptBlock),
 }
 
+#[derive(Debug)]
 pub struct CryptFile {
     blocks: Vec<Block>,
 }

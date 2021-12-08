@@ -62,7 +62,6 @@ fn encrypt_dir(password: &str, write_file: bool, path: &Path) -> Vec<Result<(), 
 fn encrypt_file<P: AsRef<Path>>(
     password: &str,
     should_write: bool,
-
     path: P,
 ) -> Result<(), EncryptError> {
     let filename = format!("{}", path.as_ref().display());
@@ -70,6 +69,7 @@ fn encrypt_file<P: AsRef<Path>>(
         .map_err(|e| EncryptError::ReadFile(filename.clone(), e))?;
 
     if !CryptFile::is_crypt_file(&contents) {
+        eprintln!("Skipping encrypting {} since not a Crypt File", filename);
         return Ok(());
     }
     let mut crypt_file = CryptFile::from_str(&contents)
