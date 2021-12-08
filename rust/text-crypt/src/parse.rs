@@ -1,6 +1,6 @@
+use crate::error::ParseError;
 use crate::Block;
 use crate::CryptBlock;
-use crate::ParseError;
 use crate::END_DELIMITER;
 use crate::END_HEADER_DELIMITER;
 use crate::{CryptFile, START_DELIMITER};

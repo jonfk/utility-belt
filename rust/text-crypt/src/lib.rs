@@ -1,12 +1,12 @@
 pub mod cli;
 pub mod crypto;
+pub mod error;
 pub mod parse;
 
 use std::fmt;
 
 use base64;
 use crypto::{CryptoDecryptError, CryptoEncryptError};
-use thiserror::Error;
 
 static START_DELIMITER: &'static str = "---BEGIN CRYPT---";
 static END_HEADER_DELIMITER: &'static str = "---END CRYPT HEADER---";
@@ -78,107 +78,4 @@ impl CryptBlock {
             ..Default::default()
         }
     }
-}
-
-#[derive(Error, Debug)]
-enum CheckError {
-    #[error("Unencrypted file: {}", .0)]
-    UnencryptedFile(String),
-
-    #[error("Error reading file: {} Error: {}", .0, .1)]
-    ReadFile(String, std::io::Error),
-
-    #[error("Error walking dir: {} Error: {}", .0, .1)]
-    WalkDir(String, walkdir::Error),
-
-    #[error("Error parsing file: {} Error: {}", .0, .1)]
-    ParseCryptFile(String, ParseError),
-}
-
-// TODO implement Debug manually
-#[derive(Debug)]
-struct CheckErrors {
-    errors: Vec<CheckError>,
-}
-
-#[derive(Error, Debug)]
-enum EncryptError {
-    #[error("Error parsing file: {} Error: {}", .0, .1)]
-    ParseCryptFile(String, ParseError),
-
-    #[error("Error reading file: {} Error: {}", .0, .1)]
-    ReadFile(String, std::io::Error),
-
-    #[error("Error writing file: {} Error: {}", .0, .1)]
-    WriteFile(String, std::io::Error),
-
-    #[error("Error walking dir: {} Error: {}", .0, .1)]
-    WalkDir(String, walkdir::Error),
-
-    #[error(transparent)]
-    Encryption(#[from] CryptoEncryptError),
-}
-
-// TODO implement Debug manually
-#[derive(Debug)]
-struct EncryptErrors {
-    errors: Vec<EncryptError>,
-}
-
-#[derive(Error, Debug)]
-enum DecryptError {
-    #[error("Error parsing file: {} Error: {}", .0, .1)]
-    ParseCryptFile(String, ParseError),
-
-    #[error("Error reading file: {} Error: {}", .0, .1)]
-    ReadFile(String, std::io::Error),
-
-    #[error("Error writing file: {} Error: {}", .0, .1)]
-    WriteFile(String, std::io::Error),
-
-    #[error("Error walking dir: {} Error: {}", .0, .1)]
-    WalkDir(String, walkdir::Error),
-    #[error(transparent)]
-    Decryption(#[from] CryptoDecryptError),
-}
-
-#[derive(Debug)]
-struct DecryptErrors {
-    errors: Vec<DecryptError>,
-}
-
-#[derive(Error, Debug)]
-pub enum ParseError {
-    #[error(
-        "CRYPT Header does not have right number of arguments at line {}",
-        .0
-    )]
-    InvalidHeader(usize),
-
-    #[error(
-        "A CRYPT block cannot have more than 1 header at line {}",
-        .0
-    )]
-    MultipleHeaders(usize),
-
-    #[error(
-        "A CRYPT END Header was encountered with no start at line {}",
-        .0
-    )]
-    EndHeaderWithNoStart(usize),
-
-    #[error(
-        "A empty CRYPT block was encountered at line {}",
-        .0
-    )]
-    EmptyCryptBlock(usize),
-
-    #[error(
-        "A CRYPT END was encountered with no start at line {}",
-        .0
-    )]
-    EndWithNoStart(usize),
-
-    #[error("A CRYPT START was encountered with no end")]
-    StartWithNoEnd,
 }

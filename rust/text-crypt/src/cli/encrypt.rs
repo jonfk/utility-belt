@@ -4,7 +4,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{crypto::encrypt, Block, CryptFile, EncryptError, EncryptErrors};
+use crate::{
+    crypto::encrypt,
+    error::{EncryptError, EncryptErrors},
+    Block, CryptFile,
+};
 
 use super::walk_dir;
 
@@ -14,11 +18,11 @@ pub(crate) fn encrypt_cmd(
     paths: Vec<&str>,
 ) -> Result<(), EncryptErrors> {
     let paths = if paths.is_empty() {
-        vec![std::env::current_dir().map_err(|e| EncryptErrors {
-            errors: vec![EncryptError::ReadFile(
+        vec![std::env::current_dir().map_err(|e| {
+            EncryptErrors::new(vec![EncryptError::ReadFile(
                 "current working directory".to_string(),
                 e,
-            )],
+            )])
         })?]
     } else {
         paths.into_iter().map(|s| PathBuf::from(s)).collect()
@@ -42,7 +46,7 @@ pub(crate) fn encrypt_cmd(
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(EncryptErrors { errors })
+        Err(EncryptErrors::new(errors))
     }
 }
 

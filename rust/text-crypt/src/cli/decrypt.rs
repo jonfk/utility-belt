@@ -4,7 +4,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{crypto::decrypt, Block, CryptBlock, CryptFile, DecryptError, DecryptErrors};
+use crate::{
+    crypto::decrypt,
+    error::{DecryptError, DecryptErrors},
+    Block, CryptBlock, CryptFile,
+};
 
 use super::walk_dir;
 
@@ -14,11 +18,11 @@ pub(crate) fn decrypt_cmd(
     paths: Vec<&str>,
 ) -> Result<(), DecryptErrors> {
     let paths = if paths.is_empty() {
-        vec![std::env::current_dir().map_err(|e| DecryptErrors {
-            errors: vec![DecryptError::ReadFile(
+        vec![std::env::current_dir().map_err(|e| {
+            DecryptErrors::new(vec![DecryptError::ReadFile(
                 "current working directory".to_string(),
                 e,
-            )],
+            )])
         })?]
     } else {
         paths.into_iter().map(|s| PathBuf::from(s)).collect()
@@ -45,7 +49,7 @@ pub(crate) fn decrypt_cmd(
         })
         .collect();
     if errors.len() > 0 {
-        Err(DecryptErrors { errors })
+        Err(DecryptErrors::new(errors))
     } else {
         Ok(())
     }
