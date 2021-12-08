@@ -23,13 +23,14 @@ pub(crate) fn encrypt_cmd(
     } else {
         paths.into_iter().map(|s| PathBuf::from(s)).collect()
     };
+    let print_filenames = paths.len() > 1;
     let errors: Vec<_> = paths
         .into_iter()
         .flat_map(|path| {
             if path.is_dir() {
                 encrypt_dir(password, write_file, &path)
             } else {
-                vec![encrypt_file(password, write_file, path)]
+                vec![encrypt_file(password, write_file, path, print_filenames)]
             }
         })
         .filter_map(|res| match res {
@@ -52,7 +53,7 @@ fn encrypt_dir(password: &str, write_file: bool, path: &Path) -> Vec<Result<(), 
                 direntry.map_err(|e| EncryptError::WalkDir(format!("{}", path.display()), e))?;
             let entry_path = entry.path();
             if entry_path.is_file() {
-                encrypt_file(password, write_file, entry_path)?;
+                encrypt_file(password, write_file, entry_path, true)?;
             }
             Ok(())
         })
@@ -61,8 +62,9 @@ fn encrypt_dir(password: &str, write_file: bool, path: &Path) -> Vec<Result<(), 
 
 fn encrypt_file<P: AsRef<Path>>(
     password: &str,
-    should_write: bool,
+    write_file: bool,
     path: P,
+    print_filename: bool,
 ) -> Result<(), EncryptError> {
     let filename = format!("{}", path.as_ref().display());
     let contents = fs::read_to_string(path.as_ref())
@@ -96,12 +98,15 @@ fn encrypt_file<P: AsRef<Path>>(
 
     crypt_file.blocks = encrypted_crypt_blocks?;
 
-    if should_write {
+    if write_file {
         let mut file = File::create(path.as_ref())
             .map_err(|e| EncryptError::WriteFile(filename.to_string(), e))?;
         write!(file, "{}", crypt_file)
             .map_err(|e| EncryptError::WriteFile(filename.to_string(), e))?;
     } else {
+        if print_filename {
+            println!("{}", filename);
+        }
         println!("{}", crypt_file);
     }
     Ok(())
