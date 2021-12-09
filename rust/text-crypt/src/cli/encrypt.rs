@@ -13,6 +13,7 @@ use crate::{
 use super::walk_dir;
 
 pub(crate) fn encrypt_cmd(
+    verbose: bool,
     password: &str,
     write_file: bool,
     paths: Vec<&str>,
@@ -32,9 +33,15 @@ pub(crate) fn encrypt_cmd(
         .into_iter()
         .flat_map(|path| {
             if path.is_dir() {
-                encrypt_dir(password, write_file, &path)
+                encrypt_dir(verbose, password, write_file, &path)
             } else {
-                vec![encrypt_file(password, write_file, path, print_filenames)]
+                vec![encrypt_file(
+                    verbose,
+                    password,
+                    write_file,
+                    path,
+                    print_filenames,
+                )]
             }
         })
         .filter_map(|res| match res {
@@ -50,14 +57,19 @@ pub(crate) fn encrypt_cmd(
     }
 }
 
-fn encrypt_dir(password: &str, write_file: bool, path: &Path) -> Vec<Result<(), EncryptError>> {
+fn encrypt_dir(
+    verbose: bool,
+    password: &str,
+    write_file: bool,
+    path: &Path,
+) -> Vec<Result<(), EncryptError>> {
     walk_dir(path)
         .map(|direntry| {
             let entry =
                 direntry.map_err(|e| EncryptError::WalkDir(format!("{}", path.display()), e))?;
             let entry_path = entry.path();
             if entry_path.is_file() {
-                encrypt_file(password, write_file, entry_path, true)?;
+                encrypt_file(verbose, password, write_file, entry_path, true)?;
             }
             Ok(())
         })
@@ -65,6 +77,7 @@ fn encrypt_dir(password: &str, write_file: bool, path: &Path) -> Vec<Result<(), 
 }
 
 fn encrypt_file<P: AsRef<Path>>(
+    verbose: bool,
     password: &str,
     write_file: bool,
     path: P,
@@ -75,7 +88,9 @@ fn encrypt_file<P: AsRef<Path>>(
         .map_err(|e| EncryptError::ReadFile(filename.clone(), e))?;
 
     if !CryptFile::is_crypt_file(&contents) {
-        eprintln!("Skipping encrypting {} since not a Crypt File", filename);
+        if verbose {
+            eprintln!("Skipping encrypting {} since not a Crypt File", filename);
+        }
         return Ok(());
     }
     let mut crypt_file = CryptFile::from_str(&contents)

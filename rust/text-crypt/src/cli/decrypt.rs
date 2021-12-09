@@ -13,6 +13,7 @@ use crate::{
 use super::walk_dir;
 
 pub(crate) fn decrypt_cmd(
+    verbose: bool,
     write_file: bool,
     password: &str,
     paths: Vec<&str>,
@@ -33,9 +34,10 @@ pub(crate) fn decrypt_cmd(
         .into_iter()
         .flat_map(|path| {
             if path.is_dir() {
-                decrypt_dir(write_file, password, &path)
+                decrypt_dir(verbose, write_file, password, &path)
             } else {
                 vec![decrypt_file(
+                    verbose,
                     write_file,
                     password,
                     &path,
@@ -55,13 +57,18 @@ pub(crate) fn decrypt_cmd(
     }
 }
 
-fn decrypt_dir(write_file: bool, password: &str, path: &Path) -> Vec<Result<(), DecryptError>> {
+fn decrypt_dir(
+    verbose: bool,
+    write_file: bool,
+    password: &str,
+    path: &Path,
+) -> Vec<Result<(), DecryptError>> {
     walk_dir(path)
         .map(|dir_entry| {
             let entry =
                 dir_entry.map_err(|e| DecryptError::WalkDir(format!("{}", path.display()), e))?;
             if entry.path().is_file() {
-                decrypt_file(write_file, password, entry.path(), true)?;
+                decrypt_file(verbose, write_file, password, entry.path(), true)?;
             }
             Ok(())
         })
@@ -69,6 +76,7 @@ fn decrypt_dir(write_file: bool, password: &str, path: &Path) -> Vec<Result<(), 
 }
 
 fn decrypt_file(
+    verbose: bool,
     write: bool,
     password: &str,
     filepath: &Path,
@@ -79,7 +87,9 @@ fn decrypt_file(
         fs::read_to_string(filepath).map_err(|e| DecryptError::ReadFile(filename.clone(), e))?;
 
     if !CryptFile::is_crypt_file(&contents) {
-        eprintln!("Skipping decrypting {} since not a Crypt File", filename);
+        if verbose {
+            eprintln!("Skipping decrypting {} since not a Crypt File", filename);
+        }
         return Ok(());
     }
     let mut crypt_file = CryptFile::from_str(&contents)

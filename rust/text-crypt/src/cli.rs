@@ -15,7 +15,6 @@ pub fn run() {
         .arg(
             Arg::with_name("v")
                 .short("v")
-                .multiple(true)
                 .help("Sets the level of verbosity"),
         )
         .subcommand(
@@ -71,6 +70,8 @@ pub fn run() {
         )
         .get_matches();
 
+    let verbose = matches.occurrences_of("v") > 0;
+
     if let Some(enc_matches) = matches.subcommand_matches("encrypt") {
         let password = enc_matches
             .value_of("password")
@@ -78,7 +79,7 @@ pub fn run() {
         let paths: Vec<_> = enc_matches.values_of("INPUT").unwrap_or_default().collect();
         let write_file = enc_matches.is_present("write");
 
-        encrypt::encrypt_cmd(password, write_file, paths).expect("encrypt");
+        encrypt::encrypt_cmd(verbose, password, write_file, paths).expect("encrypt");
     } else if let Some(dec_matches) = matches.subcommand_matches("decrypt") {
         let password = dec_matches
             .value_of("password")
@@ -86,7 +87,7 @@ pub fn run() {
         let paths: Vec<_> = dec_matches.values_of("files").unwrap_or_default().collect();
         let write_file = dec_matches.is_present("write");
 
-        decrypt::decrypt_cmd(write_file, password, paths).expect("decrypt");
+        decrypt::decrypt_cmd(verbose, write_file, password, paths).expect("decrypt");
     } else if let Some(check_matches) = matches.subcommand_matches("check") {
         let files: Vec<_> = check_matches
             .values_of("files")
