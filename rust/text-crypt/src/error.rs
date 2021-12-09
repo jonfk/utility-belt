@@ -150,4 +150,7 @@ pub enum ParseError {
 
     #[error("A CRYPT START was encountered with no end")]
     StartWithNoEnd,
+
+    #[error("CRYPT block delimiters should only contain delimiters at line {}", .0)]
+    DelimiterWithAdditionalText(usize),
 }

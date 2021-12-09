@@ -1,9 +1,29 @@
 use crate::error::ParseError;
 use crate::Block;
 use crate::CryptBlock;
-use crate::END_DELIMITER;
-use crate::END_HEADER_DELIMITER;
+use crate::END_DELIMITER_CONTAINS_REGEX;
+use crate::END_DELIMITER_WHOLE_REGEX;
+use crate::END_HEADER_CONTAINS_REGEX;
+use crate::END_HEADER_WHOLE_REGEX;
+use crate::START_DELIMITER_CONTAINS_REGEX;
+use crate::START_DELIMITER_WHOLE_REGEX;
 use crate::{CryptFile, START_DELIMITER};
+
+use lazy_static::lazy_static;
+use regex::Regex;
+use regex::RegexSet;
+
+lazy_static! {
+    static ref START_RE: Regex = Regex::new(START_DELIMITER_WHOLE_REGEX).unwrap();
+    static ref HEADER_RE: Regex = Regex::new(END_HEADER_WHOLE_REGEX).unwrap();
+    static ref END_RE: Regex = Regex::new(END_DELIMITER_WHOLE_REGEX).unwrap();
+    static ref ALL_DELIMITERS_CONTAINS_RE: RegexSet = RegexSet::new(&[
+        START_DELIMITER_CONTAINS_REGEX,
+        END_HEADER_CONTAINS_REGEX,
+        END_DELIMITER_CONTAINS_REGEX
+    ])
+    .unwrap();
+}
 
 impl CryptFile {
     pub fn is_crypt_file(contents: &str) -> bool {
@@ -17,17 +37,11 @@ impl CryptFile {
 
         for (line_idx, line) in contents.lines().enumerate() {
             let line_num = line_idx + 1;
-            if line
-                .to_lowercase()
-                .contains(&START_DELIMITER.trim_matches('-').to_lowercase())
-            {
+            if START_RE.is_match(line) {
                 blocks.push(Block::Plaintext(current));
                 current = String::new();
                 current_crypt_block = Some(CryptBlock::default());
-            } else if line
-                .to_lowercase()
-                .contains(&END_HEADER_DELIMITER.trim_matches('-').to_lowercase())
-            {
+            } else if HEADER_RE.is_match(line) {
                 let header: Vec<_> = current.split(";").collect();
                 if header.len() != 2 {
                     return Err(ParseError::InvalidHeader(line_num));
@@ -44,10 +58,7 @@ impl CryptFile {
                     return Err(ParseError::EndHeaderWithNoStart(line_num));
                 }
                 current = String::new();
-            } else if line
-                .to_lowercase()
-                .contains(&END_DELIMITER.trim_matches('-').to_lowercase())
-            {
+            } else if END_RE.is_match(line) {
                 if current.trim().is_empty() {
                     return Err(ParseError::EmptyCryptBlock(line_num));
                 }
@@ -59,6 +70,8 @@ impl CryptFile {
                 }
                 current = String::new();
                 current_crypt_block = None;
+            } else if ALL_DELIMITERS_CONTAINS_RE.is_match(line) {
+                return Err(ParseError::DelimiterWithAdditionalText(line_num));
             } else {
                 current.push_str(line);
                 current.push('\n');

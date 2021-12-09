@@ -11,6 +11,13 @@ static START_DELIMITER: &'static str = "---BEGIN CRYPT---";
 static END_HEADER_DELIMITER: &'static str = "---END CRYPT HEADER---";
 static END_DELIMITER: &'static str = "---END CRYPT---";
 
+static START_DELIMITER_WHOLE_REGEX: &'static str = r"(?i)^-*BEGIN.*CRYPT-*$";
+static START_DELIMITER_CONTAINS_REGEX: &'static str = r"(?i)-*BEGIN.*CRYPT-*";
+static END_HEADER_WHOLE_REGEX: &'static str = r"(?i)^-*END.*CRYPT.*HEADER-*$";
+static END_HEADER_CONTAINS_REGEX: &'static str = r"(?i)-*END.*CRYPT.*HEADER-*";
+static END_DELIMITER_WHOLE_REGEX: &'static str = r"(?i)^-*END.*CRYPT-*$";
+static END_DELIMITER_CONTAINS_REGEX: &'static str = r"(?i)^-*END.*CRYPT-*$";
+
 const BASE64_CONFIG: base64::Config = base64::STANDARD_NO_PAD;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
