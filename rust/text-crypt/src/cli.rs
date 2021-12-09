@@ -8,7 +8,8 @@ mod decrypt;
 mod encrypt;
 
 pub fn run() {
-    let matches = App::new("text-crypt")
+    // TODO: Upgrade to clap 3 to get bash completion generation
+    let app = App::new("text-crypt")
         .version("1.0")
         .author("Jonathan Fok kan <jfokkan@gmail.com>")
         .about("Simple text encrypting program")
@@ -68,8 +69,8 @@ pub fn run() {
                 .aliases(&["c"])
                 .about("Check that no files containing \"---BEGIN CRYPT---\" are unencrypted")
                 .arg(Arg::with_name("files").help("Path to the files or directory to encrypt. Defaults to current directory if none is supplied").min_values(0)),
-        )
-        .get_matches();
+        );
+    let matches = app.clone().get_matches();
 
     let verbose = matches.occurrences_of("v") > 0;
 
@@ -95,6 +96,9 @@ pub fn run() {
             .unwrap_or_default()
             .collect();
         check::check_cmd(files).expect("check_files");
+    } else {
+        app.clone().print_help().expect("print help");
+        std::process::exit(1);
     }
 }
 fn walk_dir<P: AsRef<Path>>(
