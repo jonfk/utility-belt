@@ -1,3 +1,5 @@
+use std::fmt;
+
 use thiserror::Error;
 
 use crate::crypto::{CryptoDecryptError, CryptoEncryptError};
@@ -18,7 +20,6 @@ pub enum CheckError {
 }
 
 // TODO implement Debug manually
-#[derive(Debug)]
 pub struct CheckErrors {
     errors: Vec<CheckError>,
 }
@@ -26,6 +27,17 @@ pub struct CheckErrors {
 impl CheckErrors {
     pub fn new(errors: Vec<CheckError>) -> Self {
         CheckErrors { errors }
+    }
+}
+
+impl fmt::Debug for CheckErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "\nErrors encountered checking files\n")?;
+        self.errors
+            .iter()
+            .map(|error| write!(f, "{}\n", error))
+            .collect::<fmt::Result>()?;
+        Ok(())
     }
 }
 
@@ -47,8 +59,6 @@ pub enum EncryptError {
     Encryption(#[from] CryptoEncryptError),
 }
 
-// TODO implement Debug manually
-#[derive(Debug)]
 pub struct EncryptErrors {
     errors: Vec<EncryptError>,
 }
@@ -56,6 +66,16 @@ pub struct EncryptErrors {
 impl EncryptErrors {
     pub fn new(errors: Vec<EncryptError>) -> Self {
         EncryptErrors { errors }
+    }
+}
+
+impl fmt::Debug for EncryptErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "\nErrors encountered encrypting files\n")?;
+        self.errors
+            .iter()
+            .map(|error| write!(f, "{}\n", error))
+            .collect()
     }
 }
 
@@ -76,7 +96,6 @@ pub enum DecryptError {
     Decryption(#[from] CryptoDecryptError),
 }
 
-#[derive(Debug)]
 pub struct DecryptErrors {
     errors: Vec<DecryptError>,
 }
@@ -84,6 +103,16 @@ pub struct DecryptErrors {
 impl DecryptErrors {
     pub fn new(errors: Vec<DecryptError>) -> Self {
         DecryptErrors { errors }
+    }
+}
+
+impl fmt::Debug for DecryptErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "\nErrors encountered decrypting files\n")?;
+        self.errors
+            .iter()
+            .map(|error| write!(f, "{}\n", error))
+            .collect()
     }
 }
 

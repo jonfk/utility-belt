@@ -6,7 +6,6 @@ pub mod parse;
 use std::fmt;
 
 use base64;
-use crypto::{CryptoDecryptError, CryptoEncryptError};
 
 static START_DELIMITER: &'static str = "---BEGIN CRYPT---";
 static END_HEADER_DELIMITER: &'static str = "---END CRYPT HEADER---";
