@@ -31,6 +31,7 @@ pub fn run() {
                 .arg(
                     Arg::with_name("INPUT")
                         .help("Path to the file to encrypt")
+                        .min_values(0)
                         ,
                 )
                 .arg(
@@ -59,14 +60,14 @@ pub fn run() {
                 )
                 .arg(
                     Arg::with_name("files")
-                        .help("Path to the files or directory to encrypt"),
+                        .help("Path to the files or directory to encrypt").min_values(0),
                 ),
         )
         .subcommand(
             SubCommand::with_name("check")
                 .aliases(&["c"])
                 .about("Check that no files containing \"---BEGIN CRYPT---\" are unencrypted")
-                .arg(Arg::with_name("files").help("Path to the files or directory to encrypt. Defaults to current directory if none is supplied")),
+                .arg(Arg::with_name("files").help("Path to the files or directory to encrypt. Defaults to current directory if none is supplied").min_values(0)),
         )
         .get_matches();
 
