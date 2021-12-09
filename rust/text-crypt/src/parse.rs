@@ -1,13 +1,13 @@
 use crate::error::ParseError;
 use crate::Block;
 use crate::CryptBlock;
+use crate::CryptFile;
 use crate::END_DELIMITER_CONTAINS_REGEX;
 use crate::END_DELIMITER_WHOLE_REGEX;
 use crate::END_HEADER_CONTAINS_REGEX;
 use crate::END_HEADER_WHOLE_REGEX;
 use crate::START_DELIMITER_CONTAINS_REGEX;
 use crate::START_DELIMITER_WHOLE_REGEX;
-use crate::{CryptFile, START_DELIMITER};
 
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -27,7 +27,7 @@ lazy_static! {
 
 impl CryptFile {
     pub fn is_crypt_file(contents: &str) -> bool {
-        contents.contains(START_DELIMITER.trim_matches('-'))
+        ALL_DELIMITERS_CONTAINS_RE.is_match(contents)
     }
 
     pub fn from_str(contents: &str) -> Result<CryptFile, ParseError> {
@@ -37,11 +37,13 @@ impl CryptFile {
 
         for (line_idx, line) in contents.lines().enumerate() {
             let line_num = line_idx + 1;
-            if START_RE.is_match(line) {
-                blocks.push(Block::Plaintext(current));
+            if START_RE.is_match(line.trim()) {
+                if !current.is_empty() {
+                    blocks.push(Block::Plaintext(current));
+                }
                 current = String::new();
                 current_crypt_block = Some(CryptBlock::default());
-            } else if HEADER_RE.is_match(line) {
+            } else if HEADER_RE.is_match(line.trim()) {
                 let header: Vec<_> = current.split(";").collect();
                 if header.len() != 2 {
                     return Err(ParseError::InvalidHeader(line_num));
@@ -58,7 +60,7 @@ impl CryptFile {
                     return Err(ParseError::EndHeaderWithNoStart(line_num));
                 }
                 current = String::new();
-            } else if END_RE.is_match(line) {
+            } else if END_RE.is_match(line.trim()) {
                 if current.trim().is_empty() {
                     return Err(ParseError::EmptyCryptBlock(line_num));
                 }
@@ -109,9 +111,26 @@ blahblahblah
             Block::Crypt(CryptBlock {
                 algorithm: None,
                 nonce: None,
-                ciphertext: "hello\n".to_string()
+                ciphertext: "hello".to_string()
             }),
             Block::Plaintext("blahblahblah\n".to_string())
         ]
+    );
+}
+
+#[test]
+fn test_parse_file2() {
+    let contents = r"---BEGIN_CRYPT--
+testhello
+---END CRYPT---
+";
+    let crypt_file = CryptFile::from_str(contents).unwrap();
+    assert_eq!(crypt_file.blocks.len(), 1);
+    assert_eq!(
+        crypt_file.blocks,
+        vec![Block::Crypt(CryptBlock {
+            ciphertext: "testhello".to_string(),
+            ..Default::default()
+        })]
     );
 }
