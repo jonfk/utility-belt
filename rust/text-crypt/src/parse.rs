@@ -134,3 +134,23 @@ testhello
         })]
     );
 }
+
+#[test]
+fn test_parse_file3() {
+    let contents = r"BEGIN TEST HELLO CRYPT
+testhello
+END CRYPT
+";
+    let crypt_file = CryptFile::from_str(contents);
+    assert!(crypt_file.is_err());
+    //assert!(crypt_file.unwrap_err().m);
+}
+
+#[test]
+fn test_parse_file4() {
+    let contents = r"BEGIN TEST HELLO CRYPT
+testhello
+END TEST CRYPT
+";
+    assert!(!CryptFile::is_crypt_file(contents));
+}
