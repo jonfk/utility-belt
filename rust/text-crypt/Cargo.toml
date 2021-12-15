@@ -16,3 +16,5 @@ rand_chacha = "0.3.1"
 dotenv = "0.15.0"
 regex = "1"
 lazy_static = "1.4.0"
+rmp-serde = "0.15.5"
+serde = { version = "1.0", features = ["derive"] }

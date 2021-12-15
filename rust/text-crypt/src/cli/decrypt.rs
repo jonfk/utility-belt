@@ -7,7 +7,7 @@ use std::{
 use crate::{
     crypto::decrypt,
     error::{DecryptError, DecryptErrors},
-    Block, CryptBlock, CryptFile,
+    Block, CryptFile,
 };
 
 use super::walk_dir;
@@ -100,13 +100,10 @@ fn decrypt_file(
         .into_iter()
         .map(|mut block| match block {
             Block::Plaintext(_) => Ok(block),
-            Block::Crypt(ref mut crypt_block) => {
-                if crypt_block.is_encrypted() {
-                    let decrypted_text = decrypt(password, &crypt_block)?;
-                    Ok(Block::Crypt(CryptBlock::new_unencrypted(&decrypted_text)))
-                } else {
-                    Ok(block)
-                }
+            Block::UnencryptedCryptBlock(_) => Ok(block),
+            Block::EncryptedCryptBlock(ref mut crypt_block) => {
+                let decrypted_text = decrypt(password, &crypt_block)?;
+                Ok(Block::UnencryptedCryptBlock(decrypted_text))
             }
         })
         .collect();

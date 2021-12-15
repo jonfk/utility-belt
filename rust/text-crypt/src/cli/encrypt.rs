@@ -99,19 +99,12 @@ fn encrypt_file<P: AsRef<Path>>(
     let encrypted_crypt_blocks: Result<Vec<_>, EncryptError> = crypt_file
         .blocks
         .into_iter()
-        .map(|mut block| match block {
-            Block::Crypt(ref mut crypt_block) => {
-                if crypt_block.is_encrypted() {
-                    Ok(block)
-                } else {
-                    let encrypted_block = encrypt(password, &crypt_block.ciphertext)?;
-                    crypt_block.algorithm = encrypted_block.algorithm;
-                    crypt_block.nonce = encrypted_block.nonce;
-                    crypt_block.ciphertext = encrypted_block.ciphertext;
-                    Ok(block)
-                }
+        .map(|block| match block {
+            Block::UnencryptedCryptBlock(text) => {
+                let encrypted_block = encrypt(password, &text)?;
+                Ok(Block::EncryptedCryptBlock(encrypted_block))
             }
-            Block::Plaintext(_) => Ok(block),
+            _ => Ok(block),
         })
         .collect();
 

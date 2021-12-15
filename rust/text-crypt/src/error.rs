@@ -118,39 +118,24 @@ impl fmt::Debug for DecryptErrors {
 
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error(
-        "CRYPT Header does not have right number of arguments at line {}",
-        .0
-    )]
-    InvalidHeader(usize),
+    #[error("The number of Begin and End Crypt blocks don't match")]
+    MismatchNumStartEndCryptBlocks,
 
-    #[error(
-        "A CRYPT block cannot have more than 1 header at line {}",
-        .0
-    )]
-    MultipleHeaders(usize),
+    #[error("Encountered and End before a Begin at line {}", .0)]
+    EndBeforeBegin(usize),
 
-    #[error(
-        "A CRYPT END Header was encountered with no start at line {}",
-        .0
-    )]
-    EndHeaderWithNoStart(usize),
+    #[error("Blocks cannot be nested. Encountered a second Begin before End of block at line {}", .0)]
+    BeginBeforeEnd(usize),
 
-    #[error(
-        "A empty CRYPT block was encountered at line {}",
-        .0
-    )]
-    EmptyCryptBlock(usize),
+    #[error("Base64 decoding error: {}", .0)]
+    Base64Decode(base64::DecodeError),
 
-    #[error(
-        "A CRYPT END was encountered with no start at line {}",
-        .0
-    )]
-    EndWithNoStart(usize),
+    #[error("MessagePack decoding error: {}", .0)]
+    MessagePackDecode(rmp_serde::decode::Error),
+}
 
-    #[error("A CRYPT START was encountered with no end")]
-    StartWithNoEnd,
-
-    #[error("CRYPT block delimiters should only contain delimiters at line {}", .0)]
-    DelimiterWithAdditionalText(usize),
+#[derive(Error, Debug)]
+pub enum EncryptedCryptEncodingError {
+    #[error("MessagePack encoding error: {}", .0)]
+    MessagePackEncode(rmp_serde::encode::Error),
 }

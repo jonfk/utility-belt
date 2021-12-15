@@ -1,11 +1,8 @@
 use std::path::Path;
 use std::{fs, path::PathBuf};
 
+use crate::error::{CheckError, CheckErrors};
 use crate::CryptFile;
-use crate::{
-    error::{CheckError, CheckErrors},
-    Block,
-};
 
 use super::walk_dir;
 
@@ -65,10 +62,7 @@ fn check_file(file_path: &Path) -> Result<(), CheckError> {
     if crypt_file
         .blocks
         .into_iter()
-        .filter(|block| match block {
-            Block::Plaintext(_) => false,
-            Block::Crypt(crypt_block) => !crypt_block.is_encrypted(),
-        })
+        .filter(|block| !block.is_encrypted())
         .count()
         > 0
     {

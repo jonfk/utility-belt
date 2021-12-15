@@ -1,90 +1,169 @@
+use std::fmt;
+
+use crate::error::EncryptedCryptEncodingError;
 use crate::error::ParseError;
-use crate::Block;
-use crate::CryptBlock;
-use crate::CryptFile;
-use crate::END_DELIMITER_CONTAINS_REGEX;
-use crate::END_DELIMITER_WHOLE_REGEX;
-use crate::END_HEADER_CONTAINS_REGEX;
-use crate::END_HEADER_WHOLE_REGEX;
-use crate::START_DELIMITER_CONTAINS_REGEX;
-use crate::START_DELIMITER_WHOLE_REGEX;
 
 use lazy_static::lazy_static;
 use regex::Regex;
-use regex::RegexSet;
+use rmp_serde;
+use serde::{Deserialize, Serialize};
+
+const BASE64_CONFIG: base64::Config = base64::STANDARD_NO_PAD;
+
+const BEGIN_CRYPT_STR: &'static str = "BEGIN CRYPT";
+const BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR: &'static str = "..";
+const END_CRYPT_STR: &'static str = "END CRYPT";
+const BEGIN_CRYPT_LEN: usize = BEGIN_CRYPT_STR.len();
+const BEGIN_ENCRYPTED_CRYPT_LEN: usize =
+    BEGIN_CRYPT_STR.len() + BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR.len();
+const END_CRYPT_LEN: usize = END_CRYPT_STR.len();
 
 lazy_static! {
-    static ref START_RE: Regex = Regex::new(START_DELIMITER_WHOLE_REGEX).unwrap();
-    static ref HEADER_RE: Regex = Regex::new(END_HEADER_WHOLE_REGEX).unwrap();
-    static ref END_RE: Regex = Regex::new(END_DELIMITER_WHOLE_REGEX).unwrap();
-    static ref ALL_DELIMITERS_CONTAINS_RE: RegexSet = RegexSet::new(&[
-        START_DELIMITER_CONTAINS_REGEX,
-        END_HEADER_CONTAINS_REGEX,
-        END_DELIMITER_CONTAINS_REGEX
-    ])
-    .unwrap();
+    static ref IS_CRYPT_FILE_RE: Regex = Regex::new(r"(?i)BEGIN[\s\W\p{Punct}]*CRYPT").unwrap();
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct EncryptedCryptBlock {
+    pub algorithm: String,
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+}
+
+impl EncryptedCryptBlock {
+    pub fn from_str(input: &str) -> Result<Self, ParseError> {
+        let trimmed_input = if input[..BEGIN_CRYPT_LEN]
+            .to_uppercase()
+            .starts_with(BEGIN_CRYPT_STR)
+        {
+            &input[BEGIN_ENCRYPTED_CRYPT_LEN..(input.len() - END_CRYPT_LEN)]
+        } else {
+            input
+        };
+        let input_bytes = base64::decode_config(trimmed_input, BASE64_CONFIG)
+            .map_err(|e| ParseError::Base64Decode(e))?;
+        let block: EncryptedCryptBlock =
+            rmp_serde::from_read(&*input_bytes).map_err(|e| ParseError::MessagePackDecode(e))?;
+
+        Ok(block)
+    }
+
+    pub fn to_ascii_armor(&self) -> Result<String, EncryptedCryptEncodingError> {
+        let mut buf = Vec::new();
+        // TODO: extract to `fn to_msg_pack()`?
+        self.serialize(&mut rmp_serde::Serializer::new(&mut buf))
+            .map_err(|e| EncryptedCryptEncodingError::MessagePackEncode(e))?;
+
+        let encoded = base64::encode_config(buf, BASE64_CONFIG);
+        Ok(format!(
+            "{}{}{}{}",
+            BEGIN_CRYPT_STR, BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR, encoded, END_CRYPT_STR
+        ))
+    }
+}
+
+#[test]
+fn test_parsing_encrypted_crypt_block() {
+    let block = EncryptedCryptBlock {
+        algorithm: "test_algo".to_string(),
+        nonce: b"nonce".to_vec(),
+        ciphertext: b"this is some good ciphertext".to_vec(),
+    };
+    let armored = block.to_ascii_armor().unwrap();
+
+    let parsed = EncryptedCryptBlock::from_str(&armored).unwrap();
+
+    assert_eq!(parsed, block);
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Block {
+    Plaintext(String),
+    UnencryptedCryptBlock(String),
+    EncryptedCryptBlock(EncryptedCryptBlock),
+}
+
+impl Block {
+    pub fn is_encrypted(&self) -> bool {
+        match self {
+            Block::Plaintext(_) | Block::UnencryptedCryptBlock(_) => false,
+            Block::EncryptedCryptBlock(_) => true,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CryptFile {
+    pub blocks: Vec<Block>,
+}
+
+impl fmt::Display for CryptFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.blocks
+            .iter()
+            .map(|block| match block {
+                Block::Plaintext(text) => write!(f, "{}", text),
+                Block::UnencryptedCryptBlock(text) => {
+                    write!(f, "{}\n{}\n{}", BEGIN_CRYPT_STR, text, END_CRYPT_STR)
+                }
+                Block::EncryptedCryptBlock(block) => {
+                    let ascii_armored = block.to_ascii_armor().map_err(|e| fmt::Error)?;
+                    write!(f, "{}", ascii_armored)
+                }
+            })
+            .collect()
+    }
 }
 
 impl CryptFile {
     pub fn is_crypt_file(contents: &str) -> bool {
-        ALL_DELIMITERS_CONTAINS_RE.is_match(contents)
+        IS_CRYPT_FILE_RE.is_match(contents)
     }
 
     pub fn from_str(contents: &str) -> Result<CryptFile, ParseError> {
-        let mut current = String::new();
-        let mut current_crypt_block = None;
         let mut blocks = Vec::new();
 
-        for (line_idx, line) in contents.lines().enumerate() {
-            let line_num = line_idx + 1;
-            if START_RE.is_match(line.trim()) {
-                if !current.is_empty() {
-                    blocks.push(Block::Plaintext(current));
-                }
-                current = String::new();
-                current_crypt_block = Some(CryptBlock::default());
-            } else if HEADER_RE.is_match(line.trim()) {
-                let header: Vec<_> = current.split(";").collect();
-                if header.len() != 2 {
-                    return Err(ParseError::InvalidHeader(line_num));
-                }
-                if let Some(current_crypt_block) = current_crypt_block.as_mut() {
-                    if current_crypt_block.algorithm.is_some()
-                        || current_crypt_block.nonce.is_some()
-                    {
-                        return Err(ParseError::MultipleHeaders(line_num));
-                    }
-                    current_crypt_block.algorithm = Some(header[0].to_string());
-                    current_crypt_block.nonce = Some(header[1].trim().to_string());
-                } else {
-                    return Err(ParseError::EndHeaderWithNoStart(line_num));
-                }
-                current = String::new();
-            } else if END_RE.is_match(line.trim()) {
-                if current.trim().is_empty() {
-                    return Err(ParseError::EmptyCryptBlock(line_num));
-                }
-                if let Some(mut current_crypt_block) = current_crypt_block {
-                    current_crypt_block.ciphertext = current.trim_end().to_string();
-                    blocks.push(Block::Crypt(current_crypt_block));
-                } else {
-                    return Err(ParseError::EndWithNoStart(line_num));
-                }
-                current = String::new();
-                current_crypt_block = None;
-            } else if ALL_DELIMITERS_CONTAINS_RE.is_match(line) {
-                return Err(ParseError::DelimiterWithAdditionalText(line_num));
-            } else {
-                current.push_str(line);
-                current.push('\n');
-            }
+        // Replace with Regexes with case insensitive matching
+        let crypt_block_starts: Vec<_> = contents.match_indices(BEGIN_CRYPT_STR).collect();
+        let crypt_block_ends: Vec<_> = contents.match_indices(END_CRYPT_STR).collect();
+        dbg!(&crypt_block_starts);
+        dbg!(&crypt_block_ends);
+        if crypt_block_starts.len() != crypt_block_ends.len() {
+            return Err(ParseError::MismatchNumStartEndCryptBlocks);
         }
 
-        if current_crypt_block.is_some() {
-            return Err(ParseError::StartWithNoEnd);
+        if !crypt_block_starts.is_empty() && crypt_block_starts[0].0 != 0 {
+            let first_crypt_block = crypt_block_starts[0].0;
+            let plaintext = contents[0..first_crypt_block].to_string();
+            blocks.push(Block::Plaintext(plaintext));
         }
-        if !current.trim().is_empty() {
-            blocks.push(Block::Plaintext(current));
+
+        let mut prev_end = 0;
+        for ((start_idx, _), (end_idx, _)) in crypt_block_starts
+            .into_iter()
+            .zip(crypt_block_ends.into_iter())
+        {
+            if end_idx < start_idx {
+                return Err(ParseError::EndBeforeBegin(0));
+            }
+            if prev_end != 0 && prev_end < start_idx {
+                return Err(ParseError::BeginBeforeEnd(0));
+            }
+            if prev_end != 0 {
+                let plaintext = contents[(prev_end + END_CRYPT_STR.len())..start_idx].to_string();
+                blocks.push(Block::Plaintext(plaintext));
+            }
+
+            let matching_contents = &contents[(start_idx + BEGIN_CRYPT_STR.len())..end_idx];
+            let block =
+                if matching_contents.starts_with(BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR) {
+                    Block::EncryptedCryptBlock(EncryptedCryptBlock::from_str(
+                        &matching_contents[BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR.len()..],
+                    )?)
+                } else {
+                    Block::UnencryptedCryptBlock(matching_contents.trim().to_string())
+                };
+            blocks.push(block);
+            prev_end = end_idx;
         }
 
         Ok(CryptFile { blocks })
@@ -92,65 +171,9 @@ impl CryptFile {
 }
 
 #[test]
-fn test_parse_file() {
-    let contents = r#"hello this is a test
-test
-testing
-    ---BEGIN CRYPT---
-hello
-    ---END CRYPT---
-blahblahblah
+fn test_from_str_unencrypted() {
+    let contents = r#"hello worldBEGIN CRYPThelloworldencryptedEND CRYPTBEGIN CRYPTthisis a test\n\nEND CRYPT
 "#;
-
-    let crypt_file = CryptFile::from_str(&contents).unwrap();
-    assert_eq!(crypt_file.blocks.len(), 3);
-    assert_eq!(
-        crypt_file.blocks,
-        vec![
-            Block::Plaintext("hello this is a test\ntest\ntesting\n".to_string()),
-            Block::Crypt(CryptBlock {
-                algorithm: None,
-                nonce: None,
-                ciphertext: "hello".to_string()
-            }),
-            Block::Plaintext("blahblahblah\n".to_string())
-        ]
-    );
-}
-
-#[test]
-fn test_parse_file2() {
-    let contents = r"---BEGIN_CRYPT--
-testhello
----END CRYPT---
-";
-    let crypt_file = CryptFile::from_str(contents).unwrap();
-    assert_eq!(crypt_file.blocks.len(), 1);
-    assert_eq!(
-        crypt_file.blocks,
-        vec![Block::Crypt(CryptBlock {
-            ciphertext: "testhello".to_string(),
-            ..Default::default()
-        })]
-    );
-}
-
-#[test]
-fn test_parse_file3() {
-    let contents = r"BEGIN TEST HELLO CRYPT
-testhello
-END CRYPT
-";
-    let crypt_file = CryptFile::from_str(contents);
-    assert!(crypt_file.is_err());
-    //assert!(crypt_file.unwrap_err().m);
-}
-
-#[test]
-fn test_parse_file4() {
-    let contents = r"BEGIN TEST HELLO CRYPT
-testhello
-END TEST CRYPT
-";
-    assert!(!CryptFile::is_crypt_file(contents));
+    let parsed = CryptFile::from_str(contents).unwrap();
+    dbg!(parsed);
 }
