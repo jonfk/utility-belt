@@ -59,13 +59,7 @@ fn check_file(file_path: &Path) -> Result<(), CheckError> {
     }
     let crypt_file = CryptFile::from_str(&contents)
         .map_err(|e| CheckError::ParseCryptFile(format!("{}", file_path.display()), e))?;
-    if crypt_file
-        .blocks
-        .into_iter()
-        .filter(|block| !block.is_encrypted())
-        .count()
-        > 0
-    {
+    if crypt_file.has_unencrypted_crypt_blocks() {
         return Err(CheckError::UnencryptedFile(format!(
             "{}",
             file_path.display()

@@ -120,14 +120,19 @@ impl CryptFile {
         IS_CRYPT_FILE_RE.is_match(contents)
     }
 
+    pub fn has_unencrypted_crypt_blocks(&self) -> bool {
+        self.blocks.iter().any(|block| match block {
+            Block::UnencryptedCryptBlock(_) => true,
+            _ => false,
+        })
+    }
+
     pub fn from_str(contents: &str) -> Result<CryptFile, ParseError> {
         let mut blocks = Vec::new();
 
         // Replace with Regexes with case insensitive matching
         let crypt_block_starts: Vec<_> = contents.match_indices(BEGIN_CRYPT_STR).collect();
         let crypt_block_ends: Vec<_> = contents.match_indices(END_CRYPT_STR).collect();
-        dbg!(&crypt_block_starts);
-        dbg!(&crypt_block_ends);
         if crypt_block_starts.len() != crypt_block_ends.len() {
             return Err(ParseError::MismatchNumStartEndCryptBlocks);
         }
