@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 const BASE64_CONFIG: base64::Config = base64::STANDARD_NO_PAD;
 
 const BEGIN_CRYPT_STR: &'static str = "BEGIN CRYPT";
-const BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR: &'static str = "..";
+const BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR: &'static str = ".e.";
 const END_CRYPT_STR: &'static str = "END CRYPT";
 const BEGIN_CRYPT_LEN: usize = BEGIN_CRYPT_STR.len();
 const BEGIN_ENCRYPTED_CRYPT_LEN: usize =
@@ -31,13 +31,14 @@ pub struct EncryptedCryptBlock {
 
 impl EncryptedCryptBlock {
     pub fn from_str(input: &str) -> Result<Self, ParseError> {
+        let input: String = input.chars().filter(|c| !c.is_whitespace()).collect();
         let trimmed_input = if input[..BEGIN_CRYPT_LEN]
             .to_uppercase()
             .starts_with(BEGIN_CRYPT_STR)
         {
             &input[BEGIN_ENCRYPTED_CRYPT_LEN..(input.len() - END_CRYPT_LEN)]
         } else {
-            input
+            &input
         };
         let input_bytes = base64::decode_config(trimmed_input, BASE64_CONFIG)
             .map_err(|e| ParseError::Base64Decode(e))?;
@@ -145,7 +146,7 @@ impl CryptFile {
             if end_idx < start_idx {
                 return Err(ParseError::EndBeforeBegin(0));
             }
-            if prev_end != 0 && prev_end < start_idx {
+            if prev_end != 0 && prev_end > start_idx {
                 return Err(ParseError::BeginBeforeEnd(0));
             }
             if prev_end != 0 {
@@ -177,3 +178,5 @@ fn test_from_str_unencrypted() {
     let parsed = CryptFile::from_str(contents).unwrap();
     dbg!(parsed);
 }
+
+// TODO: Add more test cases for errors
