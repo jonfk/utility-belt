@@ -50,11 +50,7 @@ impl fmt::Display for CryptFile {
                             END_DELIMITER
                         )
                     } else {
-                        write!(
-                            f,
-                            "{}\n{}\n{}\n",
-                            START_DELIMITER, crypt_block.ciphertext, END_DELIMITER
-                        )
+                        write!(f, "BEGIN CRYPT\n{}\nEND CRYPT\n", crypt_block.ciphertext)
                     }
                 }
             })
