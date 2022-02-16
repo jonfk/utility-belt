@@ -13,9 +13,12 @@ const BASE64_CONFIG: base64::Config = base64::STANDARD_NO_PAD;
 const BEGIN_CRYPT_STR: &'static str = "BEGIN CRYPT";
 const BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR: &'static str = ".e.";
 const END_CRYPT_STR: &'static str = "END CRYPT";
+
 const BEGIN_CRYPT_LEN: usize = BEGIN_CRYPT_STR.len();
+const BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_LEN: usize =
+    BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR.len();
 const BEGIN_ENCRYPTED_CRYPT_LEN: usize =
-    BEGIN_CRYPT_STR.len() + BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR.len();
+    BEGIN_CRYPT_LEN + BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_LEN;
 const END_CRYPT_LEN: usize = END_CRYPT_STR.len();
 
 lazy_static! {
@@ -31,7 +34,6 @@ pub struct EncryptedCryptBlock {
 
 impl EncryptedCryptBlock {
     pub fn from_str(input: &str) -> Result<Self, ParseError> {
-        let input: String = input.chars().filter(|c| !c.is_whitespace()).collect();
         let trimmed_input = if input[..BEGIN_CRYPT_LEN]
             .to_uppercase()
             .starts_with(BEGIN_CRYPT_STR)
@@ -40,6 +42,10 @@ impl EncryptedCryptBlock {
         } else {
             &input
         };
+        let trimmed_input: String = trimmed_input
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
         let input_bytes = base64::decode_config(trimmed_input, BASE64_CONFIG)
             .map_err(|e| ParseError::Base64Decode(e))?;
         let block: EncryptedCryptBlock =
@@ -111,7 +117,13 @@ impl fmt::Display for CryptFile {
                     write!(f, "{}", ascii_armored)
                 }
             })
-            .collect()
+            .collect::<fmt::Result>()?;
+        if let Some(Block::Plaintext(text)) = self.blocks.last() {
+            if !text.ends_with('\n') {
+                write!(f, "\n")?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -154,16 +166,16 @@ impl CryptFile {
             if prev_end != 0 && prev_end > start_idx {
                 return Err(ParseError::BeginBeforeEnd(0));
             }
-            if prev_end != 0 {
-                let plaintext = contents[(prev_end + END_CRYPT_STR.len())..start_idx].to_string();
+            if prev_end != 0 && (prev_end + END_CRYPT_LEN) < start_idx {
+                let plaintext = contents[(prev_end + END_CRYPT_LEN)..start_idx].to_string();
                 blocks.push(Block::Plaintext(plaintext));
             }
 
-            let matching_contents = &contents[(start_idx + BEGIN_CRYPT_STR.len())..end_idx];
+            let matching_contents = &contents[(start_idx + BEGIN_CRYPT_LEN)..end_idx];
             let block =
                 if matching_contents.starts_with(BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR) {
                     Block::EncryptedCryptBlock(EncryptedCryptBlock::from_str(
-                        &matching_contents[BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_STR.len()..],
+                        &matching_contents[BEGIN_ENCRYPTED_CRYPT_ENCRYPTION_MARKER_LEN..],
                     )?)
                 } else {
                     Block::UnencryptedCryptBlock(matching_contents.trim().to_string())
@@ -172,16 +184,54 @@ impl CryptFile {
             prev_end = end_idx;
         }
 
+        if prev_end != contents.len() - 1 {
+            let plaintext = &contents[(prev_end + END_CRYPT_LEN)..];
+            blocks.push(Block::Plaintext(plaintext.to_string()));
+        }
+
         Ok(CryptFile { blocks })
     }
 }
 
 #[test]
 fn test_from_str_unencrypted() {
-    let contents = r#"hello worldBEGIN CRYPThelloworldencryptedEND CRYPTBEGIN CRYPTthisis a test\n\nEND CRYPT
+    let contents = r#"hello worldBEGIN CRYPThelloworldencryptedEND CRYPTBEGIN CRYPTthisis a test
+
+END CRYPT
 "#;
     let parsed = CryptFile::from_str(contents).unwrap();
-    dbg!(parsed);
+
+    assert_eq!(
+        parsed.blocks,
+        vec![
+            Block::Plaintext("hello world".to_string()),
+            Block::UnencryptedCryptBlock("helloworldencrypted".to_string()),
+            Block::UnencryptedCryptBlock("thisis a test".to_string()),
+            Block::Plaintext("\n".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn test_plaintext_after_crypt() {
+    let contents = r"hello worldBEGIN CRYPTthis is a crypt END CRYPT plaintext
+BEGIN CRYPT
+encrypted text
+END CRYPT
+ending plaintext";
+
+    let parsed = CryptFile::from_str(contents).unwrap();
+
+    assert_eq!(
+        parsed.blocks,
+        vec![
+            Block::Plaintext("hello world".to_string()),
+            Block::UnencryptedCryptBlock("this is a crypt".to_string()),
+            Block::Plaintext(" plaintext\n".to_string()),
+            Block::UnencryptedCryptBlock("encrypted text".to_string()),
+            Block::Plaintext("\nending plaintext".to_string())
+        ]
+    );
 }
 
 // TODO: Add more test cases for errors
