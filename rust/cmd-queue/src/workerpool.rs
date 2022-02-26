@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rayon::ThreadPool;
 
-use crate::{task::TaskService, TaskRanState};
+use crate::task::TaskService;
 
 pub struct WorkerPool {
     task_svc: Arc<TaskService>,

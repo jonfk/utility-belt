@@ -3,7 +3,7 @@ use std::{process::Command, sync::Arc, thread, time::Duration};
 use crate::{queue::Queue, TaskRanState, TaskState};
 
 const MAX_RETRIES: usize = 10;
-const MAX_DELAY_SECONDS: u64 = 300;
+const MAX_DELAY_SECONDS: u64 = 600;
 const DELAY_SECONDS: u64 = 2;
 
 pub struct TaskService {
@@ -12,9 +12,7 @@ pub struct TaskService {
 
 impl TaskService {
     pub fn new(queue: Arc<dyn Queue + Send + Sync>) -> Self {
-        TaskService {
-            queue
-        }
+        TaskService { queue }
     }
     pub fn run_next_task(&self) -> TaskRanState {
         if let Some((task_id, task)) = self.queue.pop_next() {

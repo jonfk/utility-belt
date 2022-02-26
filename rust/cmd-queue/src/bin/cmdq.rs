@@ -18,18 +18,42 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Subcommands {
     /// Download with yt-dlp
-    Ytdlp { url: String },
+    Ytdlp {
+        url: String,
+        #[clap(long, short, help = "Optional prefix to filename downloaded")]
+        prefix: Option<String>,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
     println!("{:?}", cli);
     let cwd = std::env::current_dir().expect("current dir");
-    command_request(
-        &cwd.to_string_lossy(),
-        &cli.input[0],
-        cli.input.clone().into_iter().skip(1).collect(),
-    );
+
+    if !cli.input.is_empty() {
+        command_request(
+            &cwd.to_string_lossy(),
+            &cli.input[0],
+            cli.input.clone().into_iter().skip(1).collect(),
+        );
+    } else if let Some(subcommand) = cli.subcommands {
+        match subcommand {
+            Subcommands::Ytdlp { url, prefix } => {
+                let args = if let Some(prefix) = prefix {
+                    vec![
+                        "-o".to_string(),
+                        format!("{} %(title)s [%(id)s].%(ext)s", prefix),
+                        url,
+                    ]
+                } else {
+                    vec![url]
+                };
+                command_request(&cwd.to_string_lossy(), "yt-dlp", args);
+            }
+        }
+    } else {
+        println!("no command queued");
+    }
 }
 
 fn command_request(cwd: &str, program: &str, args: Vec<String>) {
