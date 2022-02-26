@@ -3,14 +3,11 @@ use std::sync::Arc;
 use actix_web::{web, App, HttpServer, Responder};
 use cmd_queue::{CommandQApp, CommandRequest, CommandResponse, CommandSuccess};
 
-async fn index() -> impl Responder {
-    "Hello world!"
-}
-
 async fn queue_command(
     app: web::Data<Arc<CommandQApp>>,
     command: web::Json<CommandRequest>,
 ) -> impl Responder {
+    println!("queue command {:?}", command);
     app.queue.push_cmd(&command);
 
     web::Json(CommandResponse::Success(CommandSuccess {}))
