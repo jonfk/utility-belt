@@ -85,6 +85,9 @@ fn start_server_if_needed() -> std::io::Result<()> {
     let resp = reqwest::blocking::get(server_host("health"));
     if resp.is_err() {
         std::process::Command::new("cmdq_server").spawn()?;
+        // TODO better handling of waiting for server to startup
+        // Continue to poll health endpoint with max attempts and backoff
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
     Ok(())
 }
