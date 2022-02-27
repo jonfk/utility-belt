@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use cmd_queue::{CommandRequest, CommandResponse};
+use cmd_queue::{constants, error::CmdqClientError, CommandRequest, CommandResponse};
 use reqwest;
 
 #[derive(Parser, Debug)]
@@ -23,19 +23,24 @@ enum Subcommands {
         #[clap(long, short, help = "Optional prefix to filename downloaded")]
         prefix: Option<String>,
     },
+    Shutdown {
+        #[clap(long, short, help = "Force shutdown of cmdq server")]
+        force: bool,
+    },
 }
 
-fn main() {
+fn main() -> Result<(), CmdqClientError> {
     let cli = Cli::parse();
     println!("{:?}", cli);
     let cwd = std::env::current_dir().expect("current dir");
+    start_server_if_needed().expect("failed to start server");
 
     if !cli.input.is_empty() {
         command_request(
             &cwd.to_string_lossy(),
             &cli.input[0],
             cli.input.clone().into_iter().skip(1).collect(),
-        );
+        )
     } else if let Some(subcommand) = cli.subcommands {
         match subcommand {
             Subcommands::Ytdlp { url, prefix } => {
@@ -48,27 +53,57 @@ fn main() {
                 } else {
                     vec![url]
                 };
-                command_request(&cwd.to_string_lossy(), "yt-dlp", args);
+                command_request(&cwd.to_string_lossy(), "yt-dlp", args)
             }
+            Subcommands::Shutdown { force } => shutdown_server(),
         }
     } else {
         println!("no command queued");
+        Ok(())
     }
 }
 
-fn command_request(cwd: &str, program: &str, args: Vec<String>) {
+fn command_request(cwd: &str, program: &str, args: Vec<String>) -> Result<(), CmdqClientError> {
     let client = reqwest::blocking::Client::new();
     let response = client
-        .post("http://localhost:8080/commands/")
+        .post(server_host("commands/"))
         .json(&CommandRequest {
             path: cwd.to_string(),
             program: program.to_string(),
             args: args,
         })
         .send()
-        .expect("client response error");
+        .map_err(|e| CmdqClientError::HttpClientError(e))?;
     println!("{:?}", response);
-    let json_response = response
+    let cmd_response = response
         .json::<CommandResponse>()
-        .expect("deserialize response");
+        .map_err(|e| CmdqClientError::ResponseDeserializationError(e))?;
+    Ok(())
+}
+
+fn start_server_if_needed() -> std::io::Result<()> {
+    let resp = reqwest::blocking::get(server_host("health"));
+    if resp.is_err() {
+        std::process::Command::new("cmdq_server").spawn()?;
+    }
+    Ok(())
+}
+
+fn shutdown_server() -> Result<(), CmdqClientError> {
+    use nix::sys::signal::{self, Signal};
+    use nix::unistd::Pid;
+    use std::fs;
+    let pid_str = fs::read_to_string(constants::SERVER_DAEMON_PIDFILE).map_err(|e| {
+        CmdqClientError::ReadServerPidFile(constants::SERVER_DAEMON_PIDFILE.to_string(), e)
+    })?;
+    let pid = pid_str
+        .parse::<i32>()
+        .map_err(|e| CmdqClientError::ParseServerPid(e))?;
+    signal::kill(Pid::from_raw(pid), Signal::SIGINT)
+        .map_err(|e| CmdqClientError::KillServer(pid, e))?;
+    Ok(())
+}
+
+fn server_host(path: &str) -> String {
+    format!("http://localhost:{}/{}", constants::DEFAULT_PORT, path)
 }
