@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::{IntoApp, Parser, Subcommand};
+use clap_complete;
 use cmd_queue::{constants, error::CmdqClientError, CommandRequest, CommandResponse};
 use reqwest;
 
@@ -23,9 +24,14 @@ enum Subcommands {
         #[clap(long, short, help = "Optional prefix to filename downloaded")]
         prefix: Option<String>,
     },
+    /// Shutdown server daemon
     Shutdown {
         #[clap(long, short, help = "Force shutdown of cmdq server")]
         force: bool,
+    },
+    GenerateCompletion {
+        #[clap(arg_enum)]
+        shell: clap_complete::Shell,
     },
 }
 
@@ -33,14 +39,10 @@ fn main() -> Result<(), CmdqClientError> {
     let cli = Cli::parse();
     println!("{:?}", cli);
     let cwd = std::env::current_dir().expect("current dir");
-    start_server_if_needed().expect("failed to start server");
 
-    if !cli.input.is_empty() {
-        command_request(
-            &cwd.to_string_lossy(),
-            &cli.input[0],
-            cli.input.clone().into_iter().skip(1).collect(),
-        )
+    if !cli.input.is_empty() && cli.subcommands.is_some() {
+        println!("Sorry, but I don't know what to do both INPUT and subcommand were encountered. Going to sleep instead.");
+        Ok(())
     } else if let Some(subcommand) = cli.subcommands {
         match subcommand {
             Subcommands::Ytdlp { url, prefix } => {
@@ -56,14 +58,30 @@ fn main() -> Result<(), CmdqClientError> {
                 command_request(&cwd.to_string_lossy(), "yt-dlp", args)
             }
             Subcommands::Shutdown { force } => shutdown_server(),
+            Subcommands::GenerateCompletion { shell } => {
+                print_completions(shell, &mut Cli::command_for_update());
+                Ok(())
+            }
         }
+    } else if !cli.input.is_empty() {
+        command_request(
+            &cwd.to_string_lossy(),
+            &cli.input[0],
+            cli.input.clone().into_iter().skip(1).collect(),
+        )
     } else {
         println!("no command queued");
         Ok(())
     }
 }
 
+fn print_completions<G: clap_complete::Generator>(gen: G, cmd: &mut clap::Command) {
+    clap_complete::generate(gen, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
+}
+
 fn command_request(cwd: &str, program: &str, args: Vec<String>) -> Result<(), CmdqClientError> {
+    start_server_if_needed().expect("failed to start server");
+
     let client = reqwest::blocking::Client::new();
     let response = client
         .post(server_host("commands/"))

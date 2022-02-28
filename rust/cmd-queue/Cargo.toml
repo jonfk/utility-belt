@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 actix-web = "3"
 clap = { version = "3.0.14", features = ["derive"] }
+clap_complete = "3.1.0"
 reqwest = { version = "0.11", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -19,3 +20,4 @@ dashmap = "5.1.0"
 daemonize = "0.4.1"
 nix = "0.23.1"
 tracing = "0.1"
+sled = "0.34.7"
