@@ -37,7 +37,7 @@ enum Subcommands {
 
 fn main() -> Result<(), CmdqClientError> {
     let cli = Cli::parse();
-    //println!("{:?}", cli);
+    println!("{:?}", cli);
     let cwd = std::env::current_dir().expect("current dir");
 
     if !cli.input.is_empty() && cli.subcommands.is_some() {
@@ -57,7 +57,7 @@ fn main() -> Result<(), CmdqClientError> {
                 };
                 command_request(&cwd.to_string_lossy(), "yt-dlp", args)
             }
-            Subcommands::Shutdown { force } => shutdown_server(),
+            Subcommands::Shutdown { force } => shutdown_server(force),
             Subcommands::GenerateCompletion { shell } => {
                 print_completions(shell, &mut Cli::command_for_update());
                 Ok(())
@@ -110,7 +110,7 @@ fn start_server_if_needed() -> std::io::Result<()> {
     Ok(())
 }
 
-fn shutdown_server() -> Result<(), CmdqClientError> {
+fn shutdown_server(force: bool) -> Result<(), CmdqClientError> {
     use nix::sys::signal::{self, Signal};
     use nix::unistd::Pid;
     use std::fs;
@@ -120,8 +120,12 @@ fn shutdown_server() -> Result<(), CmdqClientError> {
     let pid = pid_str
         .parse::<i32>()
         .map_err(|e| CmdqClientError::ParseServerPid(e))?;
-    signal::kill(Pid::from_raw(pid), Signal::SIGINT)
-        .map_err(|e| CmdqClientError::KillServer(pid, e))?;
+    let signal = if force {
+        Signal::SIGTERM
+    } else {
+        Signal::SIGINT
+    };
+    signal::kill(Pid::from_raw(pid), signal).map_err(|e| CmdqClientError::KillServer(pid, e))?;
     Ok(())
 }
 
