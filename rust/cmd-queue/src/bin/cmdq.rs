@@ -4,7 +4,7 @@ use cmd_queue::{constants, error::CmdqClientError, CommandRequest, CommandRespon
 use reqwest;
 
 #[derive(Parser, Debug)]
-#[clap(name = "Command Queue")]
+#[clap(name = "cmdq")]
 #[clap(author = "Jonathan Fok kan <jonathan@fokkan.ca>")]
 #[clap(version = "1.0")]
 #[clap(about = "A program to queue commands", long_about = None)]
