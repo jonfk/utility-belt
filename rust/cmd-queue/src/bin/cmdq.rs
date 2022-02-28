@@ -37,7 +37,7 @@ enum Subcommands {
 
 fn main() -> Result<(), CmdqClientError> {
     let cli = Cli::parse();
-    println!("{:?}", cli);
+    //println!("{:?}", cli);
     let cwd = std::env::current_dir().expect("current dir");
 
     if !cli.input.is_empty() && cli.subcommands.is_some() {
