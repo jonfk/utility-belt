@@ -6,8 +6,9 @@ use rayon::ThreadPoolBuilder;
 use serde::{Deserialize, Serialize};
 use workerpool::WorkerPool;
 
-pub mod error;
+pub mod client;
 pub mod constants;
+pub mod error;
 pub mod queue;
 pub mod task;
 pub mod workerpool;
@@ -31,17 +32,24 @@ pub struct CommandSuccess {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandFailed {}
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Task {
+    id: String,
     command: CommandRequest,
     tries: usize,
     last_attempt: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TaskState {
+pub enum TaskRunState {
     Completed,
     Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub enum TaskState {
+    Running,
+    Queued,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +57,11 @@ pub enum TaskRanState {
     Completed,
     Empty,
     Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListRequest {
+    pub state_filters: Option<Vec<TaskState>>,
 }
 
 #[derive(Clone)]

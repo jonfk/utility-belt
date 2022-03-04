@@ -1,6 +1,6 @@
 use clap::{IntoApp, Parser, Subcommand};
 use clap_complete;
-use cmd_queue::{constants, error::CmdqClientError, CommandRequest, CommandResponse};
+use cmd_queue::{client::Client, constants, error::CmdqClientError, CommandRequest, TaskState};
 use reqwest;
 
 #[derive(Parser, Debug)]
@@ -28,6 +28,10 @@ enum Subcommands {
     Shutdown {
         #[clap(long, short, help = "Force shutdown of cmdq server")]
         force: bool,
+    },
+    List {
+        #[clap(long, short, help = "Filter by running tasks")]
+        running: bool,
     },
     GenerateCompletion {
         #[clap(arg_enum)]
@@ -58,6 +62,7 @@ fn main() -> Result<(), CmdqClientError> {
                 command_request(&cwd.to_string_lossy(), "yt-dlp", args)
             }
             Subcommands::Shutdown { force } => shutdown_server(force),
+            Subcommands::List { running } => list_tasks(running),
             Subcommands::GenerateCompletion { shell } => {
                 print_completions(shell, &mut Cli::command_for_update());
                 Ok(())
@@ -82,20 +87,29 @@ fn print_completions<G: clap_complete::Generator>(gen: G, cmd: &mut clap::Comman
 fn command_request(cwd: &str, program: &str, args: Vec<String>) -> Result<(), CmdqClientError> {
     start_server_if_needed().expect("failed to start server");
 
-    let client = reqwest::blocking::Client::new();
-    let response = client
-        .post(server_host("commands/"))
-        .json(&CommandRequest {
-            path: cwd.to_string(),
-            program: program.to_string(),
-            args: args,
-        })
-        .send()
-        .map_err(|e| CmdqClientError::HttpClientError(e))?;
-    println!("{:?}", response);
-    let cmd_response = response
-        .json::<CommandResponse>()
-        .map_err(|e| CmdqClientError::ResponseDeserializationError(e))?;
+    let client = Client::new(&format!("http://localhost:{}", constants::DEFAULT_PORT))?;
+    let _cmd_resp = client.queue_command(CommandRequest {
+        path: cwd.to_string(),
+        program: program.to_string(),
+        args: args,
+    })?;
+    Ok(())
+}
+
+fn list_tasks(running: bool) -> Result<(), CmdqClientError> {
+    start_server_if_needed().expect("failed to start server");
+
+    let mut state_filters = Vec::new();
+    if running {
+        state_filters.push(TaskState::Running);
+    }
+
+    let client = Client::new(&format!("http://localhost:{}", constants::DEFAULT_PORT))?;
+    let tasks = client.list_tasks(state_filters)?;
+    println!("tasks: {:?}", tasks);
+    for task in tasks {
+        println!("{:?}", task);
+    }
     Ok(())
 }
 

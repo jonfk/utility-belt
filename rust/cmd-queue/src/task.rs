@@ -1,6 +1,6 @@
 use std::{process::Command, sync::Arc, thread, time::Duration};
 
-use crate::{queue::Queue, TaskRanState, TaskState};
+use crate::{queue::Queue, TaskRanState, TaskRunState};
 
 const MAX_RETRIES: usize = 10;
 const MAX_DELAY_SECONDS: u64 = 600;
@@ -15,7 +15,7 @@ impl TaskService {
         TaskService { queue }
     }
     pub fn run_next_task(&self) -> TaskRanState {
-        if let Some((task_id, task)) = self.queue.pop_next() {
+        if let Some(task) = self.queue.pop_next() {
             println!("Running task {:?}", task);
             if task.tries > 1 {
                 thread::sleep(delay(task.tries as u32));
@@ -34,13 +34,13 @@ impl TaskService {
             match output_res {
                 Ok(output) => {
                     if output.status.success() {
-                        self.queue.update(task_id, TaskState::Completed);
+                        self.queue.update(&task.id, TaskRunState::Completed);
                     } else {
-                        self.queue.update(task_id, TaskState::Failed);
+                        self.queue.update(&task.id, TaskRunState::Failed);
                     }
                     println!("{:?}", output);
                 }
-                Err(_err) => self.queue.update(task_id, TaskState::Failed),
+                Err(_err) => self.queue.update(&task.id, TaskRunState::Failed),
             }
             TaskRanState::Completed
         } else {

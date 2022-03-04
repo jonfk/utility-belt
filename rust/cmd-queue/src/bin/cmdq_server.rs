@@ -1,12 +1,13 @@
 use std::{fs::File, sync::Arc};
 
-use actix_web::{web, App, HttpServer, Responder};
+use actix_web::{post, web, App, HttpServer, Responder};
 use cmd_queue::{
     constants::{self, DEFAULT_PORT},
-    CommandQApp, CommandRequest, CommandResponse, CommandSuccess,
+    CommandQApp, CommandRequest, CommandResponse, CommandSuccess, ListRequest,
 };
 use daemonize::Daemonize;
 
+#[post("/commands")]
 async fn queue_command(
     app: web::Data<Arc<CommandQApp>>,
     command: web::Json<CommandRequest>,
@@ -15,6 +16,22 @@ async fn queue_command(
     app.queue.push_cmd(&command);
 
     web::Json(CommandResponse::Success(CommandSuccess {}))
+}
+
+#[post("/commands/list")]
+async fn list_tasks(
+    app: web::Data<Arc<CommandQApp>>,
+    request: web::Json<ListRequest>,
+) -> impl Responder {
+    let tasks = app.queue.list(
+        request
+            .state_filters
+            .as_ref()
+            .unwrap_or(&Vec::new())
+            .to_vec(),
+    );
+
+    web::Json(tasks)
 }
 
 async fn health() -> impl Responder {
@@ -29,7 +46,13 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .data(cmdq_app.clone())
-            .service(web::scope("/commands").route("/", web::post().to(queue_command)))
+            .service(queue_command)
+            .service(list_tasks)
+            // .service(
+            //     web::scope("/commands")
+            //         .route("/", web::post().to(queue_command))
+            //         .route("/", web::method().to(list_tasks)),
+            // )
             .service(web::resource("/health").to(health))
     })
     .bind(format!("127.0.0.1:{}", DEFAULT_PORT))?

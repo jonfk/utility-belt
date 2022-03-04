@@ -22,4 +22,7 @@ pub enum CmdqClientError {
 
     #[error("Error deserializing HTTP response with {}", .0)]
     ResponseDeserializationError(reqwest::Error),
+
+    #[error("Error parsing server host {}. {}", .0, .1)]
+    ServerHostUrlParseError(String, url::ParseError),
 }
