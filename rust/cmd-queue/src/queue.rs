@@ -4,7 +4,7 @@ use crossbeam::queue::SegQueue;
 use dashmap::DashMap;
 use nanoid::nanoid;
 
-use crate::{CommandRequest, Task, TaskRunState, TaskState};
+use crate::{CommandRequest, Task, TaskRunResult, TaskState};
 
 const NANOID_ALPHABET: [char; 16] = [
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 'b', 'c', 'd', 'e', 'f',
@@ -26,7 +26,7 @@ pub trait Queue {
     }
     fn push(&self, task: Task);
     fn pop_next(&self) -> Option<Task>;
-    fn update(&self, id: &str, state: TaskRunState);
+    fn update(&self, id: &str, state: TaskRunResult);
     fn list(&self, state_filters: Vec<TaskState>) -> Vec<Task>;
     fn query(&self, id: &str) -> Option<(Task, TaskState)>;
 }
@@ -53,7 +53,6 @@ impl Queue for InMemoryQueue {
     fn pop_next(&self) -> Option<Task> {
         if let Some(mut task) = self.queue.pop() {
             task.tries += 1;
-            task.last_attempt = Some(SystemTime::now());
 
             self.running.insert(task.id.clone(), task.clone());
             Some(task)
@@ -62,12 +61,17 @@ impl Queue for InMemoryQueue {
         }
     }
 
-    fn update(&self, id: &str, state: TaskRunState) {
+    fn update(&self, id: &str, state: TaskRunResult) {
         match state {
-            TaskRunState::Completed => {
+            TaskRunResult::Completed => {
                 self.running.remove(id);
             }
-            TaskRunState::Failed => {
+            TaskRunResult::Failed => {
+                let (_id, mut task) = self.running.remove(id).expect("task does not exist");
+                task.last_attempt = Some(SystemTime::now());
+                self.queue.push(task);
+            }
+            TaskRunResult::Skipped => {
                 let (_id, task) = self.running.remove(id).expect("task does not exist");
                 self.queue.push(task);
             }

@@ -41,9 +41,10 @@ pub struct Task {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TaskRunState {
+pub enum TaskRunResult {
     Completed,
     Failed,
+    Skipped,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -53,10 +54,9 @@ pub enum TaskState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TaskRanState {
-    Completed,
+pub enum QueueState {
+    NotEmpty,
     Empty,
-    Skipped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
