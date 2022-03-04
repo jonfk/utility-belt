@@ -57,7 +57,7 @@ async fn main() -> std::io::Result<()> {
     if cli.daemon {
         daemonize();
     }
-    let cmdq_app = Arc::new(CommandQApp::new());
+    let cmdq_app = Arc::new(CommandQApp::new().expect("Failed to start server"));
 
     HttpServer::new(move || {
         App::new()
