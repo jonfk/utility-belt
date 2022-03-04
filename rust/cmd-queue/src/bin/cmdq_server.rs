@@ -4,7 +4,7 @@ use actix_web::{post, web, App, HttpServer, Responder};
 use clap::Parser;
 use cmd_queue::{
     constants::{self, DEFAULT_PORT},
-    CommandQApp, CommandRequest, CommandResponse, CommandSuccess, ListRequest,
+    CommandFailed, CommandQApp, CommandRequest, CommandResponse, CommandSuccess, ListRequest,
 };
 use daemonize::Daemonize;
 
@@ -24,9 +24,11 @@ async fn queue_command(
     command: web::Json<CommandRequest>,
 ) -> impl Responder {
     println!("queue command {:?}", command);
-    app.queue.push_cmd(&command);
-
-    web::Json(CommandResponse::Success(CommandSuccess {}))
+    // TODO better error handling
+    match app.queue.push_cmd(&command) {
+        Ok(_) => web::Json(CommandResponse::Success(CommandSuccess {})),
+        Err(_) => web::Json(CommandResponse::Failed(CommandFailed {})),
+    }
 }
 
 #[post("/commands/list")]

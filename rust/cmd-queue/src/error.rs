@@ -4,7 +4,13 @@ use nix::errno::Errno;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum StorageError {}
+pub enum CmdqError {
+    #[error("Error creating or loading db file at {}. {}", .0, .1)]
+    PickleLoadDbError(String, pickledb::error::Error),
+
+    #[error("Error writing to db {}", .0)]
+    PickleDbWriteError(pickledb::error::Error),
+}
 
 #[derive(Error, Debug)]
 pub enum CmdqClientError {

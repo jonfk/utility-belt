@@ -11,7 +11,10 @@ running of the commands.
 [x] Retries with exponential backoff and max wait
 [x] Commands run in the directory the `cmdq` command was invoked in
 [x] Shell completion through clap_complete (see #issues)
-[ ] listing commands
+[x] listing commands (only supports running)
+    [ ] better display UI
+    [ ] queued commands
+    [ ] failed commands
 [ ] Persistent queue. Commands should not be lost in case of a crash/power outage
     - Queue order will not be guaranteed
     - Queued commands could potentially be run twice if for example the crash occurred right after it completed but before it persisted it's completion

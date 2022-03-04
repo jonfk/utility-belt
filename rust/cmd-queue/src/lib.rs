@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::SystemTime};
 
-use crate::{queue::Queue, task::TaskService};
+use crate::task::TaskService;
+use error::CmdqError;
 use queue::InMemoryQueue;
 use rayon::ThreadPoolBuilder;
 use serde::{Deserialize, Serialize};
@@ -66,14 +67,14 @@ pub struct ListRequest {
 
 #[derive(Clone)]
 pub struct CommandQApp {
-    pub queue: Arc<dyn Queue + Send + Sync>,
+    pub queue: Arc<InMemoryQueue>,
     pub task_svc: Arc<TaskService>,
     pub worker_pool: Arc<WorkerPool>,
 }
 
 impl CommandQApp {
-    pub fn new() -> Self {
-        let queue = Arc::new(InMemoryQueue::new());
+    pub fn new() -> Result<Self, CmdqError> {
+        let queue = Arc::new(InMemoryQueue::new()?);
         let task_svc = Arc::new(TaskService::new(queue.clone()));
 
         let num_workers = 6;
@@ -84,10 +85,10 @@ impl CommandQApp {
         let worker_pool = Arc::new(WorkerPool::new(task_svc.clone(), num_workers, thread_pool));
         worker_pool.spawn();
 
-        CommandQApp {
+        Ok(CommandQApp {
             queue: queue,
             task_svc: task_svc,
             worker_pool: worker_pool,
-        }
+        })
     }
 }

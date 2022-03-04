@@ -5,21 +5,21 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{queue::Queue, QueueState, TaskRunResult};
+use crate::{error::CmdqError, queue::InMemoryQueue, QueueState, TaskRunResult};
 
 const MAX_RETRIES: usize = 10;
 const MAX_DELAY_SECONDS: u64 = 600;
 const DELAY_SECONDS: u64 = 2;
 
 pub struct TaskService {
-    queue: Arc<dyn Queue + Send + Sync>,
+    queue: Arc<InMemoryQueue>,
 }
 
 impl TaskService {
-    pub fn new(queue: Arc<dyn Queue + Send + Sync>) -> Self {
+    pub fn new(queue: Arc<InMemoryQueue>) -> Self {
         TaskService { queue }
     }
-    pub fn run_next_task(&self) -> QueueState {
+    pub fn run_next_task(&self) -> Result<QueueState, CmdqError> {
         if let Some(task) = self.queue.pop_next() {
             println!("Running task {:?}", task);
             if task.tries > 1
@@ -30,13 +30,13 @@ impl TaskService {
                     })
                     .unwrap_or(false)
             {
-                self.queue.update(&task.id, TaskRunResult::Skipped);
-                return QueueState::NotEmpty;
+                self.queue.update(&task.id, TaskRunResult::Skipped)?;
+                return Ok(QueueState::NotEmpty);
             }
 
             if task.tries > MAX_RETRIES {
                 println!("Task was retried more than {}, skipping", MAX_RETRIES);
-                return QueueState::NotEmpty;
+                return Ok(QueueState::NotEmpty);
             }
 
             let output_res = Command::new(&task.command.program)
@@ -47,17 +47,17 @@ impl TaskService {
             match output_res {
                 Ok(output) => {
                     if output.status.success() {
-                        self.queue.update(&task.id, TaskRunResult::Completed);
+                        self.queue.update(&task.id, TaskRunResult::Completed)?;
                     } else {
-                        self.queue.update(&task.id, TaskRunResult::Failed);
+                        self.queue.update(&task.id, TaskRunResult::Failed)?;
                     }
                     println!("{:?}", output);
                 }
-                Err(_err) => self.queue.update(&task.id, TaskRunResult::Failed),
+                Err(_err) => self.queue.update(&task.id, TaskRunResult::Failed)?,
             }
-            QueueState::NotEmpty
+            Ok(QueueState::NotEmpty)
         } else {
-            QueueState::Empty
+            Ok(QueueState::Empty)
         }
     }
 }

@@ -22,7 +22,10 @@ impl WorkerPool {
         for _i in 0..self.num_workers {
             let task_svc = self.task_svc.clone();
             self.thread_pool.spawn(move || loop {
-                task_svc.run_next_task();
+                match task_svc.run_next_task() {
+                    Ok(_) => {}
+                    Err(e) => println!("Error running task {}", e),
+                }
             });
         }
     }
