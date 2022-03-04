@@ -1,11 +1,22 @@
 use std::{fs::File, sync::Arc};
 
 use actix_web::{post, web, App, HttpServer, Responder};
+use clap::Parser;
 use cmd_queue::{
     constants::{self, DEFAULT_PORT},
     CommandQApp, CommandRequest, CommandResponse, CommandSuccess, ListRequest,
 };
 use daemonize::Daemonize;
+
+#[derive(Parser, Debug)]
+#[clap(name = "cmdq_server")]
+#[clap(author = "Jonathan Fok kan <jonathan@fokkan.ca>")]
+#[clap(version = "1.0")]
+#[clap(about = "cmdq server", long_about = None)]
+struct ServerCli {
+    #[clap(long, short, help = "Daemonize server process")]
+    daemon: bool,
+}
 
 #[post("/commands")]
 async fn queue_command(
@@ -40,7 +51,10 @@ async fn health() -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    daemonize();
+    let cli = ServerCli::parse();
+    if cli.daemon {
+        daemonize();
+    }
     let cmdq_app = Arc::new(CommandQApp::new());
 
     HttpServer::new(move || {
@@ -70,11 +84,11 @@ fn daemonize() {
         .working_directory(constants::SERVER_DAEMON_DIR) // for default behaviour.
         .stdout(stdout) // Redirect stdout to `/tmp/daemon.out`.
         .stderr(stderr) // Redirect stderr to `/tmp/daemon.err`.
-        .exit_action(|| println!("Executed before master process exits"))
+        .exit_action(|| println!("Server started as daemon"))
         .privileged_action(|| "Executed before drop privileges");
 
     match daemonize.start() {
         Ok(_) => println!("Success, daemonized"),
-        Err(e) => eprintln!("Error, {}", e),
+        Err(e) => eprintln!("Error starting server as daemon. error={}", e),
     }
 }
