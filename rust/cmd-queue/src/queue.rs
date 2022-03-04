@@ -77,11 +77,12 @@ impl Queue for InMemoryQueue {
     fn list(&self, state_filters: Vec<TaskState>) -> Vec<Task> {
         let mut tasks: Vec<Task> = Vec::new();
         if state_filters.contains(&TaskState::Running) || state_filters.is_empty() {
-            self.running
+            let mut running_tasks = self
+                .running
                 .iter()
                 .map(|mapref| mapref.value().clone())
-                .collect::<Vec<_>>()
-                .append(&mut tasks);
+                .collect::<Vec<_>>();
+            tasks.append(&mut running_tasks);
         }
         tasks
     }

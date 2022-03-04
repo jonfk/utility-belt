@@ -7,7 +7,7 @@ const MAX_DELAY_SECONDS: u64 = 600;
 const DELAY_SECONDS: u64 = 2;
 
 pub struct TaskService {
-    pub queue: Arc<dyn Queue + Send + Sync>,
+    queue: Arc<dyn Queue + Send + Sync>,
 }
 
 impl TaskService {
