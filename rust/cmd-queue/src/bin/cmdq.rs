@@ -106,7 +106,6 @@ fn list_tasks(running: bool) -> Result<(), CmdqClientError> {
 
     let client = Client::new(&format!("http://localhost:{}", constants::DEFAULT_PORT))?;
     let tasks = client.list_tasks(state_filters)?;
-    println!("tasks: {:?}", tasks);
     for task in tasks {
         println!("{:?}", task);
     }

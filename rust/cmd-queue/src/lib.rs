@@ -14,7 +14,7 @@ pub mod queue;
 pub mod task;
 pub mod workerpool;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CommandRequest {
     pub path: String,
     pub program: String,
@@ -33,7 +33,7 @@ pub struct CommandSuccess {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandFailed {}
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Task {
     id: String,
     command: CommandRequest,

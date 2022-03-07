@@ -83,6 +83,12 @@ impl InMemoryQueue {
         match state {
             TaskRunResult::Completed => {
                 self.running.remove(id);
+                {
+                    let mut pickledb = self.pickledb.write().unwrap();
+                    pickledb
+                        .rem(id)
+                        .map_err(|e| CmdqError::PickleDbWriteError(e))?;
+                }
             }
             TaskRunResult::Failed => {
                 let (_id, mut task) = self.running.remove(id).expect("task does not exist");
@@ -115,7 +121,6 @@ impl InMemoryQueue {
                 .collect::<Vec<_>>();
             tasks.append(&mut running_tasks);
         }
-        // TODO dedup or find a more intelligent filtering mechanism
         if state_filters.contains(&TaskState::Queued) || state_filters.is_empty() {
             let pickledb = self.pickledb.read().unwrap();
             let mut queued_tasks = pickledb
@@ -124,6 +129,8 @@ impl InMemoryQueue {
                 .collect::<Vec<_>>();
             tasks.append(&mut queued_tasks);
         }
+        // TODO find a more intelligent filtering mechanism instead of just dedup
+        tasks.dedup();
         tasks
     }
 
