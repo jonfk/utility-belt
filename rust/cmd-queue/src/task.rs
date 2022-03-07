@@ -7,7 +7,7 @@ use std::{
 
 use crate::{error::CmdqError, queue::InMemoryQueue, QueueState, TaskRunResult};
 
-const MAX_RETRIES: usize = 10;
+const MAX_RETRIES: usize = 20;
 const MAX_DELAY_SECONDS: u64 = 600;
 const DELAY_SECONDS: u64 = 2;
 

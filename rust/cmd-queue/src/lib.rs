@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::SystemTime};
 
 use crate::task::TaskService;
+use constants::DEFAULT_CONCURRENCY_LEVEL;
 use error::CmdqError;
 use queue::InMemoryQueue;
 use rayon::ThreadPoolBuilder;
@@ -77,7 +78,7 @@ impl CommandQApp {
         let queue = Arc::new(InMemoryQueue::new()?);
         let task_svc = Arc::new(TaskService::new(queue.clone()));
 
-        let num_workers = 6;
+        let num_workers = DEFAULT_CONCURRENCY_LEVEL;
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_workers)
             .build()
