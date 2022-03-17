@@ -21,7 +21,7 @@ pub fn run() {
         .subcommand(
             SubCommand::with_name("encrypt")
                 .aliases(&["e", "enc"])
-                .about("Encrypt files containing \"---BEGIN CRYPT---\"")
+                .about("Encrypt files containing \"BEGIN CRYPT\"")
                 .arg(
                     Arg::with_name("password")
                         .env("PASS")
@@ -45,7 +45,7 @@ pub fn run() {
         .subcommand(
             SubCommand::with_name("decrypt")
                 .aliases(&["d", "dec"])
-                .about("Decrypt files containing \"---BEGIN CRYPT---\"")
+                .about("Decrypt files containing \"BEGIN CRYPT\"")
                 .arg(
                     Arg::with_name("password")
                         .env("PASS")
@@ -67,7 +67,7 @@ pub fn run() {
         .subcommand(
             SubCommand::with_name("check")
                 .aliases(&["c"])
-                .about("Check that no files containing \"---BEGIN CRYPT---\" are unencrypted")
+                .about("Check that no files containing \"BEGIN CRYPT\" are unencrypted")
                 .arg(Arg::with_name("files").help("Path to the files or directory to encrypt. Defaults to current directory if none is supplied").min_values(0)),
         );
     let matches = app.clone().get_matches();
