@@ -1,6 +1,8 @@
 use clap::{IntoApp, Parser, Subcommand};
 use clap_complete;
-use cmd_queue::{client::Client, constants, error::CmdqClientError, CommandRequest, TaskState};
+use cmd_queue::{
+    cli_util, client::Client, constants, error::CmdqClientError, CommandRequest, TaskState,
+};
 use reqwest;
 
 #[derive(Parser, Debug)]
@@ -41,7 +43,8 @@ enum Subcommands {
 
 fn main() -> Result<(), CmdqClientError> {
     let cli = Cli::parse();
-    println!("{:?}", cli);
+    // TODO print as debug
+    //println!("{:?}", cli);
     let cwd = std::env::current_dir().expect("current dir");
 
     if !cli.input.is_empty() && cli.subcommands.is_some() {
@@ -106,9 +109,7 @@ fn list_tasks(running: bool) -> Result<(), CmdqClientError> {
 
     let client = Client::new(&format!("http://localhost:{}", constants::DEFAULT_PORT))?;
     let tasks = client.list_tasks(state_filters)?;
-    for task in tasks {
-        println!("{:?}", task);
-    }
+    cli_util::print_tasks_as_table(tasks).expect("failed print tasks");
     Ok(())
 }
 

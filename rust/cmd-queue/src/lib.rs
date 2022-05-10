@@ -8,6 +8,7 @@ use rayon::ThreadPoolBuilder;
 use serde::{Deserialize, Serialize};
 use workerpool::WorkerPool;
 
+pub mod cli_util;
 pub mod client;
 pub mod constants;
 pub mod error;

@@ -13,6 +13,7 @@ running of the commands.
 [x] Shell completion through clap_complete (see #issues)
 [x] listing commands (only supports running)
     [ ] better display UI
+    [ ] short and long options for listing
     [ ] queued commands
     [ ] failed commands
 [ ] Persistent queue. Commands should not be lost in case of a crash/power outage
