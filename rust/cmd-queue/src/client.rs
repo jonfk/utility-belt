@@ -22,7 +22,7 @@ impl Client {
         cmd_req: CommandRequest,
     ) -> Result<CommandResponse, CmdqClientError> {
         let mut req_url = self.host.clone();
-        req_url.set_path("commands");
+        req_url.set_path("api/commands");
 
         let response = self
             .client
@@ -40,7 +40,7 @@ impl Client {
 
     pub fn list_tasks(&self, state_filters: Vec<TaskState>) -> Result<Vec<Task>, CmdqClientError> {
         let mut req_url = self.host.clone();
-        req_url.set_path("commands/list");
+        req_url.set_path("api/commands/list");
         let resp = self
             .client
             .post(req_url)

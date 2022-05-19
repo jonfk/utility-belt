@@ -14,6 +14,7 @@ pub mod constants;
 pub mod error;
 pub mod queue;
 pub mod task;
+pub mod web;
 pub mod workerpool;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, PartialOrd, Ord)]
