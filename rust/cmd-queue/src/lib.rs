@@ -63,11 +63,6 @@ pub enum QueueState {
     Empty,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ListRequest {
-    pub state_filters: Option<Vec<TaskState>>,
-}
-
 #[derive(Clone)]
 pub struct CommandQApp {
     pub queue: Arc<InMemoryQueue>,

@@ -3,9 +3,7 @@ use std::sync::Arc;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use askama::Template;
 
-use crate::{
-    CommandFailed, CommandQApp, CommandRequest, CommandResponse, CommandSuccess, ListRequest,
-};
+use crate::{CommandFailed, CommandQApp, CommandRequest, CommandResponse, CommandSuccess};
 
 #[derive(Template)]
 #[template(path = "index.html")]

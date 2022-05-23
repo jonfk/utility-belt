@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use actix_web::{post, web, App, HttpServer, Responder};
+use actix_web::{get, post, web, Responder};
 
-use crate::{
-    CommandFailed, CommandQApp, CommandRequest, CommandResponse, CommandSuccess, ListRequest,
-};
+use crate::{CommandFailed, CommandQApp, CommandRequest, CommandResponse, CommandSuccess};
 
 #[post("/api/commands")]
 async fn queue_command(
@@ -19,18 +17,12 @@ async fn queue_command(
     }
 }
 
-#[post("/api/commands/list")]
-async fn list_tasks(
-    app: web::Data<Arc<CommandQApp>>,
-    request: web::Json<ListRequest>,
-) -> impl Responder {
-    let tasks = app.queue.list(
-        request
-            .state_filters
-            .as_ref()
-            .unwrap_or(&Vec::new())
-            .to_vec(),
-    );
+#[get("/api/commands/list/queued")]
+async fn list_queued_tasks(app: web::Data<Arc<CommandQApp>>) -> impl Responder {
+    web::Json(app.queue.queued())
+}
 
-    web::Json(tasks)
+#[get("/api/commands/list/running")]
+async fn list_running_tasks(app: web::Data<Arc<CommandQApp>>) -> impl Responder {
+    web::Json(app.queue.running())
 }

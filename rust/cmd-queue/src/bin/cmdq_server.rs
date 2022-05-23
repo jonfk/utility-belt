@@ -5,7 +5,7 @@ use clap::Parser;
 use cmd_queue::{
     constants::DEFAULT_PORT,
     web::{
-        api::{list_tasks, queue_command},
+        api::{list_queued_tasks, list_running_tasks, queue_command},
         html::index,
     },
     CommandQApp,
@@ -31,7 +31,8 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .data(cmdq_app.clone())
             .service(queue_command)
-            .service(list_tasks)
+            .service(list_queued_tasks)
+            .service(list_running_tasks)
             .service(index)
             .service(web::resource("/health").to(health))
     })

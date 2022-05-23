@@ -1,8 +1,6 @@
 use url::Url;
 
-use crate::{
-    error::CmdqClientError, CommandRequest, CommandResponse, ListRequest, Task, TaskState,
-};
+use crate::{error::CmdqClientError, CommandRequest, CommandResponse, Task, TaskState};
 
 pub struct Client {
     client: reqwest::blocking::Client,
@@ -39,24 +37,6 @@ impl Client {
     }
 
     pub fn list_tasks(&self, state_filters: Vec<TaskState>) -> Result<Vec<Task>, CmdqClientError> {
-        let mut req_url = self.host.clone();
-        req_url.set_path("api/commands/list");
-        let resp = self
-            .client
-            .post(req_url)
-            .json(&ListRequest {
-                state_filters: if state_filters.is_empty() {
-                    None
-                } else {
-                    Some(state_filters)
-                },
-            })
-            .send()
-            .map_err(|e| CmdqClientError::HttpClientError(e))?;
-
-        let cmd_resp = resp
-            .json::<Vec<Task>>()
-            .map_err(|e| CmdqClientError::ResponseDeserializationError(e))?;
-        Ok(cmd_resp)
+        todo!("deprecated. To remove")
     }
 }
