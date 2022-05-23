@@ -24,6 +24,44 @@
 </head>
 
 <body>
+
+  <h3>Running Tasks</h3>
+
+  <table>
+    <tr>
+      <th>path</th>
+      <th>process</th>
+      <th>tries</th>
+      <th>last attempt</th>
+    </tr>
+    {% for task in running_tasks %}
+    <tr>
+      <td>{{ task.path }}</td>
+      <td>{{ task.process }}</td>
+      <td>{{ task.tries }}</td>
+      <td>{{ task.last_attempt }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h3>Queued Tasks</h3>
+
+  <table>
+    <tr>
+      <th>path</th>
+      <th>process</th>
+      <th>tries</th>
+      <th>last attempt</th>
+    </tr>
+    {% for task in queued_tasks %}
+    <tr>
+      <td>{{ task.path }}</td>
+      <td>{{ task.process }}</td>
+      <td>{{ task.tries }}</td>
+      <td>{{ task.last_attempt }}</td>
+    </tr>
+    {% endfor %}
+  </table>
   
 </body>
 </html>

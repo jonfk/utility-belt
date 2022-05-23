@@ -127,22 +127,7 @@ fn start_server_if_needed() -> std::io::Result<()> {
 }
 
 fn shutdown_server(force: bool) -> Result<(), CmdqClientError> {
-    use nix::sys::signal::{self, Signal};
-    use nix::unistd::Pid;
-    use std::fs;
-    let pid_str = fs::read_to_string(constants::SERVER_DAEMON_PIDFILE).map_err(|e| {
-        CmdqClientError::ReadServerPidFile(constants::SERVER_DAEMON_PIDFILE.to_string(), e)
-    })?;
-    let pid = pid_str
-        .parse::<i32>()
-        .map_err(|e| CmdqClientError::ParseServerPid(e))?;
-    let signal = if force {
-        Signal::SIGTERM
-    } else {
-        Signal::SIGINT
-    };
-    signal::kill(Pid::from_raw(pid), signal).map_err(|e| CmdqClientError::KillServer(pid, e))?;
-    Ok(())
+    todo!("deprecated. to be removed")
 }
 
 fn server_host(path: &str) -> String {
