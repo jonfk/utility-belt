@@ -36,7 +36,31 @@ impl Client {
         Ok(cmd_response)
     }
 
-    pub fn list_tasks(&self, state_filters: Vec<TaskState>) -> Result<Vec<Task>, CmdqClientError> {
-        todo!("deprecated. To remove")
+    pub fn list_tasks(&self, state_filter: TaskState) -> Result<Vec<Task>, CmdqClientError> {
+        //todo!("deprecated. To remove")
+        let req_url = match state_filter {
+            TaskState::Queued => {
+                let mut req_url = self.host.clone();
+                req_url.set_path("/api/commands/list/queued");
+                req_url
+            }
+            TaskState::Running => {
+                let mut req_url = self.host.clone();
+                req_url.set_path("/api/commands/list/running");
+                req_url
+            }
+        };
+
+        let response = self
+            .client
+            .get(req_url)
+            .send()
+            .map_err(|e| CmdqClientError::HttpClientError(e))?;
+
+        //println!("{:?}", response);
+        let cmd_response = response
+            .json::<Vec<Task>>()
+            .map_err(|e| CmdqClientError::ResponseDeserializationError(e))?;
+        Ok(cmd_response)
     }
 }

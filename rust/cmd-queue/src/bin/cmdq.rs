@@ -11,7 +11,7 @@ use reqwest;
 #[clap(version = "1.0")]
 #[clap(about = "A program to queue commands", long_about = None)]
 struct Cli {
-    #[clap(help = "server url")]
+    #[clap(help = "server url", env = "CMDQ_SERVER_URL")]
     pub server_url: String,
     #[clap(help = "command to queue")]
     pub input: Vec<String>,
@@ -44,6 +44,8 @@ fn main() -> Result<(), CmdqClientError> {
     //println!("{:?}", cli);
     let cwd = std::env::current_dir().expect("current dir");
 
+    let cli_app = CliApp::new(cli.server_url);
+
     if !cli.input.is_empty() && cli.subcommands.is_some() {
         println!("Sorry, but I don't know what to do both INPUT and subcommand were encountered. Going to sleep instead.");
         Ok(())
@@ -59,16 +61,16 @@ fn main() -> Result<(), CmdqClientError> {
                 } else {
                     vec![url]
                 };
-                command_request(&cwd.to_string_lossy(), "yt-dlp", args)
+                cli_app.command_request(&cwd.to_string_lossy(), "yt-dlp", args)
             }
-            Subcommands::List { running } => list_tasks(running),
+            Subcommands::List { running } => cli_app.list_tasks(running),
             Subcommands::GenerateCompletion { shell } => {
                 print_completions(shell, &mut Cli::command_for_update());
                 Ok(())
             }
         }
     } else if !cli.input.is_empty() {
-        command_request(
+        cli_app.command_request(
             &cwd.to_string_lossy(),
             &cli.input[0],
             cli.input.clone().into_iter().skip(1).collect(),
@@ -83,28 +85,39 @@ fn print_completions<G: clap_complete::Generator>(gen: G, cmd: &mut clap::Comman
     clap_complete::generate(gen, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
 }
 
-fn command_request(cwd: &str, program: &str, args: Vec<String>) -> Result<(), CmdqClientError> {
-    let client = Client::new(&format!("http://localhost:{}", constants::DEFAULT_PORT))?;
-    let _cmd_resp = client.queue_command(CommandRequest {
-        path: cwd.to_string(),
-        program: program.to_string(),
-        args: args,
-    })?;
-    Ok(())
+pub struct CliApp {
+    client: Client,
 }
 
-fn list_tasks(running: bool) -> Result<(), CmdqClientError> {
-    let mut state_filters = Vec::new();
-    if running {
-        state_filters.push(TaskState::Running);
+impl CliApp {
+    fn new(server_url: String) -> Self {
+        CliApp {
+            client: Client::new(&server_url).expect("failed creating client"),
+        }
     }
 
-    let client = Client::new(&format!("http://localhost:{}", constants::DEFAULT_PORT))?;
-    let tasks = client.list_tasks(state_filters)?;
-    cli_util::print_tasks_as_table(tasks).expect("failed print tasks");
-    Ok(())
-}
+    fn command_request(
+        &self,
+        dir: &str,
+        program: &str,
+        args: Vec<String>,
+    ) -> Result<(), CmdqClientError> {
+        let _cmd_resp = self.client.queue_command(CommandRequest {
+            path: dir.to_string(),
+            program: program.to_string(),
+            args: args,
+        })?;
+        Ok(())
+    }
 
-fn server_host(path: &str) -> String {
-    format!("http://localhost:{}/{}", constants::DEFAULT_PORT, path)
+    fn list_tasks(&self, running: bool) -> Result<(), CmdqClientError> {
+        let state_filter = if running {
+            TaskState::Running
+        } else {
+            TaskState::Queued
+        };
+        let tasks = self.client.list_tasks(state_filter)?;
+        cli_util::print_tasks_as_table(tasks).expect("failed print tasks");
+        Ok(())
+    }
 }
