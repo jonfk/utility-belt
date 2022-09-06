@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use nanoid::nanoid;
 use pickledb::{PickleDb, PickleDbDumpPolicy, SerializationMethod};
 
-use crate::{constants, error::CmdqError, CommandRequest, Task, TaskRunResult, TaskState};
+use crate::{constants, error::CmdqError, CommandRequest, Task, TaskRunResult};
 
 const NANOID_ALPHABET: [char; 16] = [
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 'b', 'c', 'd', 'e', 'f',
