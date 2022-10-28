@@ -5,7 +5,9 @@ use crate::error::CmdqError;
 
 #[derive(Debug, Deserialize)]
 pub struct Record {
+    #[serde(rename = "url")]
     pub url: String,
+    #[serde(rename = "title")]
     pub title: String,
 }
 

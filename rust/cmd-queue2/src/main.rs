@@ -3,8 +3,8 @@ use error::CmdqError;
 use std::{
     ffi::OsStr,
     fs::File,
-    path::{Path, PathBuf},
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 pub mod error;
