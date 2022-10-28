@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::process::Command;
+use tracing::{event, span, Level};
 
 use crate::error::CmdqError;
 
@@ -12,6 +13,9 @@ pub struct Record {
 }
 
 pub fn execute(url: &str, title: &str) -> Result<(), CmdqError> {
+    let span = span!(Level::INFO, "yt-dlp execute", url, title);
+    let _enter = span.enter();
+
     let filename = format!("{} [%(id)s].%(ext)s", clean_title(title));
     validate_filename(&filename)?;
 
@@ -26,14 +30,17 @@ pub fn execute(url: &str, title: &str) -> Result<(), CmdqError> {
     })?;
 
     if output.status.success() {
+        event!(Level::INFO, "execution succeeded");
         Ok(())
     } else {
-        Err(CmdqError::ProcessExecuteOutputError {
+        let error = CmdqError::ProcessExecuteOutputError {
             stdout: String::from_utf8(output.stdout)
                 .map_err(|_err| CmdqError::ProcessExecuteOutputNotUtf8Error)?,
             stderr: String::from_utf8(output.stderr)
                 .map_err(|_err| CmdqError::ProcessExecuteOutputNotUtf8Error)?,
-        })
+        };
+        event!(Level::INFO, message = "execution failed", ?error);
+        Err(error)
     }
 }
 
