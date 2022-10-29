@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tracing::info;
 
 pub mod error;
 pub mod ytdlp;
@@ -37,7 +38,9 @@ fn main() -> Result<(), CmdqError> {
 
             // TODO re-run errored records
 
-            write_errors(errored_records, &filepath)?;
+            if errored_records.len() > 0 {
+                write_errors(errored_records, &filepath)?;
+            }
         }
     }
     Ok(())
@@ -82,6 +85,8 @@ fn error_filepath(filepath: &str) -> PathBuf {
 
 fn write_errors(errors: Vec<ErroredRecord>, filepath: &str) -> Result<(), CmdqError> {
     let error_filepath = error_filepath(&filepath);
+    info!("writing errors to {}", error_filepath.display());
+
     let error_file =
         File::create(&error_filepath).map_err(|err| CmdqError::CreateErrorFileError {
             source: err,
