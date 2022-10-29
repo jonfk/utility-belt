@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tracing::info;
+use tracing::{event, info, span, Level};
 
 pub mod error;
 pub mod ytdlp;
@@ -33,7 +33,12 @@ fn main() -> Result<(), CmdqError> {
                         line_number: idx + 1,
                     })?;
 
-                let span = span!(Level::INFO, "yt-dlp execute", url, title);
+                let span = span!(
+                    Level::INFO,
+                    "yt-dlp execute",
+                    url = record.url,
+                    title = record.title
+                );
                 let _enter = span.enter();
 
                 event!(Level::INFO, "executing");

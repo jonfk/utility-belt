@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use std::process::Command;
-use tracing::{event, span, Level};
 
 use crate::error::CmdqError;
 
