@@ -12,6 +12,8 @@ pub mod error;
 pub mod ytdlp;
 
 fn main() -> Result<(), CmdqError> {
+    tracing_subscriber::fmt::init();
+
     let cli_args = CliArgs::parse();
 
     match cli_args.commands {
