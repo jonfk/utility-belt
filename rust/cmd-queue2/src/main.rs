@@ -32,9 +32,19 @@ fn main() -> Result<(), CmdqError> {
                         source: err,
                         line_number: idx + 1,
                     })?;
+
+                let span = span!(Level::INFO, "yt-dlp execute", url, title);
+                let _enter = span.enter();
+
+                event!(Level::INFO, "executing");
                 match ytdlp::execute(&record.url, &record.title) {
-                    Ok(_) => {}
-                    Err(err) => errored_records.push(ErroredRecord { record, err }),
+                    Ok(_) => {
+                        event!(Level::INFO, "execution succeeded");
+                    }
+                    Err(err) => {
+                        event!(Level::ERROR, message = "execution failed", ?err);
+                        errored_records.push(ErroredRecord { record, err });
+                    }
                 }
             }
 

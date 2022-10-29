@@ -13,13 +13,9 @@ pub struct Record {
 }
 
 pub fn execute(url: &str, title: &str) -> Result<(), CmdqError> {
-    let span = span!(Level::INFO, "yt-dlp execute", url, title);
-    let _enter = span.enter();
-
     let filename = format!("{} [%(id)s].%(ext)s", clean_title(title));
     validate_filename(&filename)?;
 
-    event!(Level::INFO, "executing");
     let args = vec![url.to_string(), "-o".to_string(), filename.clone()];
 
     let output = Command::new("yt-dlp").args(&args).output().map_err(|err| {
@@ -31,7 +27,6 @@ pub fn execute(url: &str, title: &str) -> Result<(), CmdqError> {
     })?;
 
     if output.status.success() {
-        event!(Level::INFO, "execution succeeded");
         Ok(())
     } else {
         let error = CmdqError::ProcessExecuteOutputError {
@@ -40,7 +35,6 @@ pub fn execute(url: &str, title: &str) -> Result<(), CmdqError> {
             stderr: String::from_utf8(output.stderr)
                 .map_err(|_err| CmdqError::ProcessExecuteOutputNotUtf8Error)?,
         };
-        event!(Level::INFO, message = "execution failed", ?error);
         Err(error)
     }
 }
@@ -51,6 +45,7 @@ fn clean_title(title: &str) -> String {
         .replace("\\", "_")
         .replace("+", "_")
         .replace(":", " ")
+        .replace("?", " ")
 }
 
 fn validate_filename(filename: &str) -> Result<(), CmdqError> {
