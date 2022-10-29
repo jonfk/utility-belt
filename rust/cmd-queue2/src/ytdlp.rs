@@ -19,6 +19,7 @@ pub fn execute(url: &str, title: &str) -> Result<(), CmdqError> {
     let filename = format!("{} [%(id)s].%(ext)s", clean_title(title));
     validate_filename(&filename)?;
 
+    event!(Level::INFO, "executing");
     let args = vec![url.to_string(), "-o".to_string(), filename.clone()];
 
     let output = Command::new("yt-dlp").args(&args).output().map_err(|err| {
