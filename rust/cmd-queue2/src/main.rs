@@ -26,12 +26,9 @@ fn main() -> Result<(), CmdqError> {
 
             let mut errored_records = Vec::new();
 
-            for (idx, result) in rdr.deserialize().enumerate() {
+            for result in rdr.deserialize() {
                 let record: ytdlp::Record =
-                    result.map_err(|err| CmdqError::CsvDeserializeError {
-                        source: err,
-                        line_number: idx + 1,
-                    })?;
+                    result.map_err(|err| CmdqError::CsvDeserializeError { source: err })?;
 
                 let span = span!(
                     Level::INFO,

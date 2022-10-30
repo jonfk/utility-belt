@@ -23,11 +23,8 @@ pub enum CmdqError {
     #[error("Could not open File `{}`", filepath)]
     FileOpenError { source: io::Error, filepath: String },
 
-    #[error("Could not deserialize record on line `{}`, with error = `{}`", .line_number, source)]
-    CsvDeserializeError {
-        source: csv::Error,
-        line_number: usize,
-    },
+    #[error("Could not deserialize record with error = `{}`", source)]
+    CsvDeserializeError { source: csv::Error },
 
     #[error("Could not create error file `{}`: {}", filepath.display(), source)]
     CreateErrorFileError {
