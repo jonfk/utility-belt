@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use error::CmdqError;
 use std::{
     ffi::OsStr,
-    fs::File,
+    fs::{self, File},
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -55,6 +55,11 @@ fn main() -> Result<(), CmdqError> {
             if errored_records.len() > 0 {
                 write_errors(errored_records, &filepath)?;
             }
+
+            fs::remove_file(&filepath).map_err(|err| CmdqError::RemoveInputFileError {
+                source: err,
+                filepath: filepath.clone(),
+            })?;
         }
     }
     Ok(())

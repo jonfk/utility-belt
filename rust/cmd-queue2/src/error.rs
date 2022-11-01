@@ -32,15 +32,18 @@ pub enum CmdqError {
         filepath: PathBuf,
     },
 
-    #[error("Could write error to error file `{}`: {}", filepath.display(), source)]
+    #[error("Could not write error to error file `{}`: {}", filepath.display(), source)]
     WriteToErrorFileError {
         source: csv::Error,
         filepath: PathBuf,
     },
 
-    #[error("Could write error file `{}`: {}", filepath.display(), source)]
+    #[error("Could not write error file `{}`: {}", filepath.display(), source)]
     WriteErrorFileError {
         source: io::Error,
         filepath: PathBuf,
     },
+
+    #[error("Error removing input file `{}`: {}", filepath, source)]
+    RemoveInputFileError { source: io::Error, filepath: String },
 }
