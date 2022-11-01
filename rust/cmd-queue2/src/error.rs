@@ -20,8 +20,11 @@ pub enum CmdqError {
     #[error("Stdout or stderr cannot be processed as text")]
     ProcessExecuteOutputNotUtf8Error,
 
-    #[error("Could not open File `{}`", filepath)]
-    FileOpenError { source: io::Error, filepath: String },
+    #[error("Could not open File `{}`", filepath.display())]
+    FileOpenError {
+        source: io::Error,
+        filepath: PathBuf,
+    },
 
     #[error("Could not deserialize record with error = `{}`", source)]
     CsvDeserializeError { source: csv::Error },
@@ -44,6 +47,9 @@ pub enum CmdqError {
         filepath: PathBuf,
     },
 
-    #[error("Error removing input file `{}`: {}", filepath, source)]
-    RemoveInputFileError { source: io::Error, filepath: String },
+    #[error("Error removing input file `{}`: {}", filepath.display(), source)]
+    RemoveInputFileError {
+        source: io::Error,
+        filepath: PathBuf,
+    },
 }
