@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-use tracing::{event, info, span, Level};
+use tracing::{event, Level};
 
 use crate::error::CmdqError;
 

@@ -1,12 +1,11 @@
 use error::CmdqError;
-use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
     fs::{self, File},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tracing::{event, info, span, Level};
+use tracing::{event, span, Level};
 
 pub mod error;
 pub mod ytdlp;

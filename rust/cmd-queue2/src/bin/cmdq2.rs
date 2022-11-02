@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 use cmd_queue2::error::CmdqError;
 use std::path::PathBuf;
-use tracing::{event, info, span, Level};
 
 fn main() -> Result<(), CmdqError> {
     tracing_subscriber::fmt::init();
