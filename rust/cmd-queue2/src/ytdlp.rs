@@ -1,5 +1,10 @@
 use serde::Deserialize;
-use std::process::Command;
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process::Command,
+};
+use tracing::{event, info, span, Level};
 
 use crate::error::CmdqError;
 
@@ -9,21 +14,30 @@ pub struct Record {
     pub url: String,
     #[serde(rename = "title")]
     pub title: String,
+    pub dir: Option<String>,
 }
 
-pub fn execute(url: &str, title: &str) -> Result<(), CmdqError> {
+pub fn execute(filepath: &Path, record: &Record) -> Result<(), CmdqError> {
+    let title = &record.title;
+    let url = record.url.clone();
+
+    let target_dir = target_dir(filepath, &record.dir)?;
+    event!(Level::INFO, target_dir = format!("{:?}", target_dir));
+
     let filename = format!("{} [%(id)s].%(ext)s", clean_title(title));
     validate_filename(&filename)?;
 
     let args = vec![url.to_string(), "-o".to_string(), filename.clone()];
 
-    let output = Command::new("yt-dlp").args(&args).output().map_err(|err| {
-        CmdqError::ProcessExecuteError {
+    let output = Command::new("yt-dlp")
+        .args(&args)
+        .current_dir(target_dir)
+        .output()
+        .map_err(|err| CmdqError::ProcessExecuteError {
             err: err,
             program: "yt-dlp".to_string(),
             args: args,
-        }
-    })?;
+        })?;
 
     if output.status.success() {
         Ok(())
@@ -36,6 +50,35 @@ pub fn execute(url: &str, title: &str) -> Result<(), CmdqError> {
         };
         Err(error)
     }
+}
+
+fn target_dir(filepath: &Path, dir: &Option<String>) -> Result<PathBuf, CmdqError> {
+    let input_dir = if let Some(parent) = filepath.parent() {
+        if parent.is_absolute() {
+            parent.to_path_buf()
+        } else {
+            let mut absolute_file_dir = env::current_dir()
+                .map_err(|e| CmdqError::GetTargetDirFromCurrentDirError { source: e })?;
+            absolute_file_dir.push(parent);
+            absolute_file_dir
+        }
+    } else {
+        env::current_dir().map_err(|e| CmdqError::GetTargetDirFromCurrentDirError { source: e })?
+    };
+
+    Ok(dir
+        .as_ref()
+        .map(|dir| {
+            let dir_path = PathBuf::from(dir);
+            if dir_path.is_absolute() {
+                dir_path
+            } else {
+                let mut target_dir = input_dir.clone();
+                target_dir.push(dir_path);
+                target_dir
+            }
+        })
+        .unwrap_or_else(|| input_dir))
 }
 
 fn clean_title(title: &str) -> String {

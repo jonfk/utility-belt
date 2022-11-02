@@ -52,4 +52,10 @@ pub enum CmdqError {
         source: io::Error,
         filepath: PathBuf,
     },
+
+    #[error(
+        "Could not figure out target directory because error getting current directory: {}",
+        source
+    )]
+    GetTargetDirFromCurrentDirError { source: io::Error },
 }

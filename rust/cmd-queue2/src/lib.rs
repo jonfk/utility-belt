@@ -32,7 +32,7 @@ pub fn run_ytdlp_file(filepath: PathBuf) -> Result<(), CmdqError> {
         let _enter = span.enter();
 
         event!(Level::INFO, "executing");
-        match ytdlp::execute(&record.url, &record.title) {
+        match ytdlp::execute(&filepath, &record) {
             Ok(_) => {
                 event!(Level::INFO, "execution succeeded");
             }
