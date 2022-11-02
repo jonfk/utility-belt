@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     env,
     path::{Path, PathBuf},
@@ -8,7 +8,7 @@ use tracing::{event, info, span, Level};
 
 use crate::error::CmdqError;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Record {
     #[serde(rename = "url")]
     pub url: String,

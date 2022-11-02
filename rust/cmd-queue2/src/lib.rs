@@ -1,4 +1,5 @@
 use error::CmdqError;
+use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
     fs::{self, File},
@@ -82,7 +83,11 @@ fn error_filepath<T: AsRef<Path>>(filepath: T) -> PathBuf {
 
 fn write_errors<T: AsRef<Path>>(errors: Vec<ErroredRecord>, filepath: T) -> Result<(), CmdqError> {
     let error_filepath = error_filepath(&filepath);
-    info!("writing errors to {}", error_filepath.display());
+    event!(
+        Level::ERROR,
+        message = "writing errors",
+        path = format!("{}", error_filepath.display())
+    );
 
     let error_file =
         File::create(&error_filepath).map_err(|err| CmdqError::CreateErrorFileError {
@@ -91,17 +96,18 @@ fn write_errors<T: AsRef<Path>>(errors: Vec<ErroredRecord>, filepath: T) -> Resu
         })?;
 
     let mut wtr = csv::Writer::from_writer(error_file);
-    wtr.write_record(&["url", "title", "error"])
+    wtr.write_record(&["url", "title", "dir", "error"])
         .map_err(|err| CmdqError::WriteToErrorFileError {
             source: err,
             filepath: error_filepath.clone(),
         })?;
     for errored_record in errors {
-        wtr.write_record(&[
+        wtr.serialize((
             errored_record.record.url,
             errored_record.record.title,
+            errored_record.record.dir,
             errored_record.err.to_string(),
-        ])
+        ))
         .map_err(|err| CmdqError::WriteToErrorFileError {
             source: err,
             filepath: error_filepath.clone(),
