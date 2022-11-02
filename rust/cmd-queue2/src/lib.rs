@@ -83,7 +83,7 @@ fn error_filepath<T: AsRef<Path>>(filepath: T) -> PathBuf {
 fn write_errors<T: AsRef<Path>>(errors: Vec<ErroredRecord>, filepath: T) -> Result<(), CmdqError> {
     let error_filepath = error_filepath(&filepath);
     event!(
-        Level::ERROR,
+        Level::WARN,
         message = "writing errors",
         path = format!("{}", error_filepath.display())
     );
