@@ -30,7 +30,7 @@ pub fn execute(filepath: &Path, record: &Record) -> Result<(), CmdqError> {
 
         vec![url.to_string(), "-o".to_string(), filename.clone()]
     } else {
-        vec![url, to_string()]
+        vec![url.to_string()]
     };
 
     let output = Command::new("yt-dlp")
