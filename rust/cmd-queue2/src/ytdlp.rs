@@ -25,12 +25,12 @@ pub fn execute(filepath: &Path, record: &Record) -> Result<(), CmdqError> {
     event!(Level::INFO, target_dir = format!("{:?}", target_dir));
 
     let args = if title.trim().len() == 0 {
+        vec![url.to_string()]
+    } else {
         let filename = format!("{} [%(id)s].%(ext)s", clean_title(title));
         validate_filename(&filename)?;
 
         vec![url.to_string(), "-o".to_string(), filename.clone()]
-    } else {
-        vec![url.to_string()]
     };
 
     let output = Command::new("yt-dlp")
