@@ -24,10 +24,14 @@ pub fn execute(filepath: &Path, record: &Record) -> Result<(), CmdqError> {
     let target_dir = target_dir(filepath, &record.dir)?;
     event!(Level::INFO, target_dir = format!("{:?}", target_dir));
 
-    let filename = format!("{} [%(id)s].%(ext)s", clean_title(title));
-    validate_filename(&filename)?;
+    let args = if title.trim().len() == 0 {
+        let filename = format!("{} [%(id)s].%(ext)s", clean_title(title));
+        validate_filename(&filename)?;
 
-    let args = vec![url.to_string(), "-o".to_string(), filename.clone()];
+        vec![url.to_string(), "-o".to_string(), filename.clone()]
+    } else {
+        vec![url, to_string()]
+    };
 
     let output = Command::new("yt-dlp")
         .args(&args)
