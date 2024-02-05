@@ -11,6 +11,8 @@ fi
 
 FILE_PATH="$1"
 CONVERT_TO_MP3=false
+echo "File path: $FILE_PATH"
+echo "Convert to MP3: $CONVERT_TO_MP3"
 
 # Check for the convert to mp3 flag
 if [ "$2" == "--convert-to-mp3" ]; then
@@ -64,9 +66,10 @@ if [ -z "$SRT_FILE" ]; then
     echo "No transcript file found."
     exit 2 # Exit with error if no transcript file is found
 else
-    # Move the .srt file to the same directory as the input file
-    mv "$SRT_FILE" "${FILEDIR}/$(basename "$SRT_FILE")"
-    echo "Transcript file moved to ${FILEDIR}/$(basename "$SRT_FILE")"
+    # Move the .srt file to the same directory as the input file and rename it to match the original file name with .srt extension
+    NEW_SRT_PATH="${FILEDIR}/${FILENAME_NO_EXT}.srt"
+    mv "$SRT_FILE" "$NEW_SRT_PATH"
+    echo "Transcript file moved and renamed to $NEW_SRT_PATH"
     
     # Clean up the output directory by deleting it
     rm -rf "$OUTPUT_DIR"
