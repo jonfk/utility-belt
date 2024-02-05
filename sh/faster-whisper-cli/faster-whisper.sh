@@ -28,6 +28,13 @@ echo "Filename: $FILENAME"
 echo "File directory: $FILEDIR"
 echo "Filename without extension: $FILENAME_NO_EXT"
 
+# Check if the output .srt file already exists
+EXPECTED_SRT_PATH="${FILEDIR}/${FILENAME_NO_EXT}.srt"
+if [ -f "$EXPECTED_SRT_PATH" ]; then
+    echo "Error: Output .srt file $EXPECTED_SRT_PATH already exists. Please remove it before rerunning this script."
+    exit 1
+fi
+
 # Generate hash of the filename
 HASH=$(echo -n "$FILENAME_NO_EXT" | md5sum | cut -d' ' -f1)
 echo "Hash of filename: $HASH"
