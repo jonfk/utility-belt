@@ -11,7 +11,9 @@ backup_file="${input_file}.backup"
 temp_file="${input_file}.tmp"
 
 # Make a backup of the original file
-cp "$input_file" "$backup_file"
+backup_dir="~/.whisper-hallucinations-backups"
+mkdir -p backup_dir
+cp "$input_file" "$backup_dir/$backup_file"
 
 # Patterns to filter (add patterns here as needed)
 patterns=(
