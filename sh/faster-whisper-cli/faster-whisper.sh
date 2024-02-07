@@ -81,4 +81,6 @@ else
     # Clean up the output directory by deleting it
     rm -rf "$OUTPUT_DIR"
     echo "Output directory ${OUTPUT_DIR} deleted."
+
+    filter-hallucinations.sh "$NEW_SRT_PATH"
 fi
