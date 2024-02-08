@@ -7,13 +7,18 @@ if [ "$#" -ne 1 ]; then
 fi
 
 input_file="$1"
-backup_file="${input_file}.backup"
+backup_dir="$HOME/.whisper-hallucinations-backups"
 temp_file="${input_file}.tmp"
 
+# Ensure the backup directory exists
+mkdir -p "$backup_dir"
+
+# Extract filename for backup
+filename=$(basename "$input_file")
+backup_file="${backup_dir}/${filename}.backup"
+
 # Make a backup of the original file
-backup_dir="~/.whisper-hallucinations-backups"
-mkdir -p $backup_dir
-cp "$input_file" "$backup_dir/$backup_file"
+cp "$input_file" "$backup_file"
 
 # Patterns to filter (add patterns here as needed)
 patterns=(
@@ -22,6 +27,7 @@ patterns=(
     "Please click"
     "Thank you for watching"
     "Thank you for your viewing"
+    "Thank you so much for watching"
     "Touhou"
     "Translated by"
     "Subtitles by"
