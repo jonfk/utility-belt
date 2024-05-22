@@ -5,8 +5,12 @@ import subprocess
 import argparse
 import re
 import json
+import fnmatch
 from collections import defaultdict
 from datetime import datetime
+
+# List of glob patterns to skip
+SKIP_PATTERNS = ['*.AAE', '*.DS_Store']
 
 def get_cache_file_name(directory, default_date):
     directory_hash = hash(directory)
@@ -49,6 +53,11 @@ def save_metadata(directory, cache, debug):
     metadata_info = {}
     for root, _, files in os.walk(directory):
         for filename in files:
+            if any(fnmatch.fnmatch(filename, pattern) for pattern in SKIP_PATTERNS):
+                if debug:
+                    print(f"Skipping file {filename} based on skip patterns.")
+                continue
+
             file_path = os.path.join(root, filename)
             if os.path.isfile(file_path) and filename not in cache:
                 metadata_info[filename] = get_metadata(file_path, debug)
