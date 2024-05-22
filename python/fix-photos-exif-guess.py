@@ -47,12 +47,13 @@ def save_metadata(directory, cache, debug):
     if debug:
         print(f"Saving metadata for files in directory: {directory}")
     metadata_info = {}
-    for filename in os.listdir(directory):
-        file_path = os.path.join(directory, filename)
-        if os.path.isfile(file_path) and filename not in cache:
-            metadata_info[filename] = get_metadata(file_path, debug)
-            if debug:
-                print(f"Metadata for {filename}: {metadata_info[filename]}")
+    for root, _, files in os.walk(directory):
+        for filename in files:
+            file_path = os.path.join(root, filename)
+            if os.path.isfile(file_path) and filename not in cache:
+                metadata_info[filename] = get_metadata(file_path, debug)
+                if debug:
+                    print(f"Metadata for {filename}: {metadata_info[filename]}")
     cache.update(metadata_info)
     return cache
 
@@ -129,7 +130,7 @@ def guess_dates(metadata_info, default_date, debug):
 
     return guesses
 
-def main(directory, default_date, debug):
+def main(directory, default_date, debug, execute):
     if debug:
         print(f"Starting processing for directory: {directory}")
     cache_file = get_cache_file_name(directory, default_date)
@@ -141,21 +142,33 @@ def main(directory, default_date, debug):
     for filename, guess_info in guesses.items():
         date = guess_info['date']
         reason = guess_info['reason']
+        file_path = os.path.join(directory, filename)
         print(f"File: {filename} - Guessed Date: {date} - Reason: {reason}")
         # Generate the exiftool command to set the DateTimeOriginal and add a comment
         command = [
             'exiftool',
-            f'-DateTimeOriginal={date}',
-            f'-UserComment={reason}',
-            f'{os.path.join(directory, filename)}'
+            f'-DateTimeOriginal="{date}"',
+            f'-UserComment="{reason}"',
+            f'"{file_path}"'
         ]
-        print(f"Command to set guessed date: {' '.join(command)}")
+        if execute:
+            if debug:
+                print(f"Executing: {' '.join(command)}")
+            result = subprocess.run(' '.join(command), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if result.returncode != 0:
+                print(f"Error executing command for file {filename}: {result.stderr}")
+                break
+            else:
+                print(f"Success: {result.stdout}")
+        else:
+            print(f"Command to set guessed date: {' '.join(command)}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fix EXIF metadata for images in a directory.")
     parser.add_argument("directory", help="Path to the directory containing images.")
     parser.add_argument("--default-date", help="Default date to use for guessing (format: YYYY:MM:DD HH:MM:SS). If not provided, the script will use the beginning of the year of the first file that has an EXIF date.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
+    parser.add_argument("--execute", action="store_true", help="Execute the exiftool commands.")
     
     args = parser.parse_args()
-    main(args.directory, args.default_date, args.debug)
+    main(args.directory, args.default_date, args.debug, args.execute)
