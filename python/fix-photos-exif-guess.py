@@ -6,6 +6,8 @@ import argparse
 import re
 import json
 import fnmatch
+import hashlib
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -13,12 +15,12 @@ from datetime import datetime
 SKIP_PATTERNS = ['*.AAE', '*.DS_Store']
 
 def get_cache_file_name(directory, default_date):
-    directory_hash = hash(directory)
+    dir_hash = hashlib.md5(directory.encode()).hexdigest()
     if default_date:
-        date_hash = hash(default_date)
+        date_hash = hashlib.md5(default_date.encode()).hexdigest()
     else:
         date_hash = "no_default_date"
-    return f"metadata_cache_{directory_hash}_{date_hash}.json"
+    return f"metadata_cache_{dir_hash}_{date_hash}.json"
 
 def load_cache(cache_file):
     if os.path.exists(cache_file):
@@ -60,9 +62,9 @@ def save_metadata(directory, cache, debug):
 
             file_path = os.path.join(root, filename)
             if os.path.isfile(file_path) and filename not in cache:
-                metadata_info[filename] = get_metadata(file_path, debug)
+                metadata_info[file_path] = get_metadata(file_path, debug)
                 if debug:
-                    print(f"Metadata for {filename}: {metadata_info[filename]}")
+                    print(f"Metadata for {file_path}: {metadata_info[file_path]}")
     cache.update(metadata_info)
     return cache
 
@@ -86,11 +88,11 @@ def guess_dates(metadata_info, default_date, debug):
     with_date = {}
     without_date = {}
     
-    for filename, metadata in metadata_info.items():
+    for file_path, metadata in metadata_info.items():
         if 'Date/Time Original' in metadata:
-            with_date[filename] = metadata['Date/Time Original']
+            with_date[file_path] = metadata['Date/Time Original']
         else:
-            without_date[filename] = metadata
+            without_date[file_path] = metadata
     
     if not default_date:
         default_date = get_default_date(with_date)
@@ -103,36 +105,37 @@ def guess_dates(metadata_info, default_date, debug):
     guesses = {}
     sorted_files = sorted(with_date.keys())
     
-    for filename in sorted(without_date.keys()):
+    for file_path in sorted(without_date.keys()):
+        filename = os.path.basename(file_path)
         closest_before = None
         closest_after = None
         filename_prefix_current = filename_prefix(filename)
-        create_date = without_date[filename].get('Create Date') or without_date[filename].get('File Create Date')
+        create_date = without_date[file_path].get('Create Date') or without_date[file_path].get('File Create Date')
 
         if create_date:
-            guesses[filename] = {'date': create_date, 'reason': "Based on file create date"}
+            guesses[file_path] = {'date': create_date, 'reason': "Based on file create date"}
             continue
 
         for ref_file in sorted_files:
-            ref_file_prefix = filename_prefix(ref_file)
+            ref_file_prefix = filename_prefix(os.path.basename(ref_file))
             if filename_prefix_current and ref_file_prefix == filename_prefix_current:
-                if ref_file < filename:
+                if ref_file < file_path:
                     closest_before = ref_file
-                elif ref_file > filename and closest_after is None:
+                elif ref_file > file_path and closest_after is None:
                     closest_after = ref_file
 
         if closest_before and closest_after:
             guess_date = with_date[closest_before]  # Choose one date for simplicity
-            guesses[filename] = {'date': guess_date, 'reason': (f"Between {with_date[closest_before]} (based on {closest_before}) and {with_date[closest_after]} "
-                                                                f"(based on {closest_after}) based on filename sequence.")}
+            guesses[file_path] = {'date': guess_date, 'reason': (f"Between {with_date[closest_before]} (based on {os.path.basename(closest_before)}) and {with_date[closest_after]} "
+                                                                 f"(based on {os.path.basename(closest_after)}) based on filename sequence.")}
         elif closest_before:
             guess_date = with_date[closest_before]
-            guesses[filename] = {'date': guess_date, 'reason': f"After {with_date[closest_before]} (based on {closest_before}) based on filename sequence."}
+            guesses[file_path] = {'date': guess_date, 'reason': f"After {with_date[closest_before]} (based on {os.path.basename(closest_before)}) based on filename sequence."}
         elif closest_after:
             guess_date = with_date[closest_after]
-            guesses[filename] = {'date': guess_date, 'reason': f"Before {with_date[closest_after]} (based on {closest_after}) based on filename sequence."}
+            guesses[file_path] = {'date': guess_date, 'reason': f"Before {with_date[closest_after]} (based on {os.path.basename(closest_after)}) based on filename sequence."}
         else:
-            guesses[filename] = {'date': default_date, 'reason': "Beginning of the year guessed."}
+            guesses[file_path] = {'date': default_date, 'reason': "Beginning of the year guessed."}
     
     if debug:
         print(f"Guessed dates: {guesses}")
@@ -140,6 +143,8 @@ def guess_dates(metadata_info, default_date, debug):
     return guesses
 
 def main(directory, default_date, debug, execute):
+    start_time = time.time()
+    
     if debug:
         print(f"Starting processing for directory: {directory}")
     cache_file = get_cache_file_name(directory, default_date)
@@ -148,11 +153,12 @@ def main(directory, default_date, debug, execute):
     save_cache(metadata_info, cache_file)
     guesses = guess_dates(metadata_info, default_date, debug)
     
-    for filename, guess_info in guesses.items():
+    modified_files_count = 0
+    
+    for file_path, guess_info in guesses.items():
         date = guess_info['date']
         reason = guess_info['reason']
-        file_path = os.path.join(directory, filename)
-        print(f"File: {filename} - Guessed Date: {date} - Reason: {reason}")
+        print(f"File: {file_path} - Guessed Date: {date} - Reason: {reason}")
         # Generate the exiftool command to set the DateTimeOriginal and add a comment
         command = [
             'exiftool',
@@ -165,12 +171,21 @@ def main(directory, default_date, debug, execute):
                 print(f"Executing: {' '.join(command)}")
             result = subprocess.run(' '.join(command), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if result.returncode != 0:
-                print(f"Error executing command for file {filename}: {result.stderr}")
+                print(f"Error executing command for file {file_path}: {result.stderr}")
                 break
             else:
                 print(f"Success: {result.stdout}")
+                modified_files_count += 1
         else:
             print(f"Command to set guessed date: {' '.join(command)}")
+            modified_files_count += 1
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+
+    print(f"Total files processed: {len(guesses)}")
+    print(f"Total files modified: {modified_files_count}")
+    print(f"Time taken: {elapsed_time:.2f} seconds")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fix EXIF metadata for images in a directory.")
