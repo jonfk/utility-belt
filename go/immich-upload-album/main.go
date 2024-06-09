@@ -25,7 +25,7 @@ func (a album) FilterValue() string { return a.AlbumName }
 
 type asset struct {
 	OriginalPath string `json:"originalPath"`
-	Type         string `json:"type"` // "IMAGE", "VIDEO", etc.
+	Type         string `json:"type"` // Possible values: ["IMAGE", "VIDEO", "AUDIO", "OTHER"]
 	ExifInfo     struct {
 		FileSizeInByte int64 `json:"fileSizeInByte"`
 	} `json:"exifInfo"`
@@ -195,8 +195,6 @@ func (m *model) setupTable() {
 	}
 
 	m.assetTable = table.New(table.WithColumns(columns), table.WithRows(rows), table.WithFocused(true))
-	// m.assetTable.SetWidth(90)
-	// m.assetTable.SetHeight(20)
 	m.assetTable.SetStyles(table.DefaultStyles())
 }
 
