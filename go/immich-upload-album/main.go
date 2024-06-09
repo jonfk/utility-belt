@@ -92,6 +92,7 @@ type model struct {
 	showTextInput  bool
 	uploadProgress float64
 	envVars        EnvVariables
+	progressCh     chan float64
 }
 
 type EnvVariables struct {
@@ -184,6 +185,8 @@ func initialModel(envVars EnvVariables) (model, error) {
 	ti.Placeholder = "Enter album name"
 	ti.Focus()
 
+	progressCh := make(chan float64)
+
 	return model{
 		albums:        albums,
 		albumList:     l,
@@ -192,11 +195,12 @@ func initialModel(envVars EnvVariables) (model, error) {
 		textInput:     ti,
 		showTextInput: false,
 		envVars:       envVars,
+		progressCh:    progressCh,
 	}, nil
 }
 
 func (m *model) Init() tea.Cmd {
-	return nil
+	return m.waitForProgress()
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -206,7 +210,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.showTextInput {
 				m.showTextInput = false
-				go m.uploadAssets(m.textInput.Value())
+				go m.uploadAssets(m.textInput.Value(), m.progressCh)
 				return m, nil
 			}
 			if !m.showAssets {
@@ -254,6 +258,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		progressModel, cmd := m.progress.Update(msg)
 		m.progress = progressModel.(progress.Model)
 		return m, cmd
+	case float64:
+		m.uploadProgress = msg
+		return m, m.waitForProgress()
 	}
 
 	var cmd tea.Cmd
@@ -280,7 +287,7 @@ func (m *model) View() string {
 		numAssets := len(m.filteredAssets())
 		totalSize := fmt.Sprintf("\nNumber of assets: %d, Total size: %s\n", numAssets, formatSize(m.totalSize()))
 		instructions := "\nPress 'q' to go back, 'p' to show photos, 'v' to show videos, 'a' to show all, 'enter' to upload assets."
-		return header + m.assetTable.View() + totalSize + instructions + "\n" + m.progress.View()
+		return header + m.assetTable.View() + totalSize + instructions + "\n" + m.progress.ViewAs(m.uploadProgress)
 	}
 	return "\n" + m.albumList.View()
 }
@@ -338,7 +345,7 @@ func formatSize(size int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
 }
 
-func (m *model) uploadAssets(albumName string) {
+func (m *model) uploadAssets(albumName string, progressCh chan<- float64) {
 	ctx := context.Background()
 
 	oauth2Config := oauth2.Config{
@@ -382,15 +389,26 @@ func (m *model) uploadAssets(albumName string) {
 		log.Fatalf("Error creating album: %v", err)
 	}
 
-	for _, asset := range m.assets {
+	totalAssets := len(m.assets)
+	for i, asset := range m.assets {
 		uploadedMediaItem, err := client.UploadToAlbum(ctx, album.ID, asset.RealFilePath)
 
 		if err != nil || uploadedMediaItem == nil {
 			log.Fatalf("Error uploading media items: %v", err)
 		}
+
+		progress := float64(i+1) / float64(totalAssets)
+		progressCh <- progress
 	}
 
 	m.uploadProgress = 1.0
+	close(progressCh)
+}
+
+func (m *model) waitForProgress() tea.Cmd {
+	return func() tea.Msg {
+		return <-m.progressCh
+	}
 }
 
 func main() {
