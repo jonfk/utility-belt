@@ -54,6 +54,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/go-resty/resty/v2"
 	gphotos "github.com/gphotosuploader/google-photos-api-client-go/v3"
 	"github.com/joho/godotenv"
@@ -93,7 +94,21 @@ type model struct {
 	uploadProgress float64
 	envVars        EnvVariables
 	progressCh     chan float64
+	authCodeInput  textinput.Model
+	authURL        string
+	authToken      *oauth2.Token
+	state          programState
+	windowWidth    int
 }
+
+type programState int
+
+const (
+	stateInit programState = iota
+	stateAuth
+	stateMain
+	stateUpload
+)
 
 type EnvVariables struct {
 	APIURL             string
@@ -185,6 +200,10 @@ func initialModel(envVars EnvVariables) (model, error) {
 	ti.Placeholder = "Enter album name"
 	ti.Focus()
 
+	authInput := textinput.New()
+	authInput.Placeholder = "Enter authorization code"
+	authInput.Focus()
+
 	progressCh := make(chan float64)
 
 	return model{
@@ -196,11 +215,16 @@ func initialModel(envVars EnvVariables) (model, error) {
 		showTextInput: false,
 		envVars:       envVars,
 		progressCh:    progressCh,
+		authCodeInput: authInput,
+		state:         stateInit,
 	}, nil
 }
 
 func (m *model) Init() tea.Cmd {
-	return m.waitForProgress()
+	return tea.Batch(
+		m.startAuthorization(),
+		m.waitForProgress(),
+	)
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -208,12 +232,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
+			if m.state == stateAuth {
+				m.state = stateMain
+				m.exchangeAuthCodeForToken(m.authCodeInput.Value())
+				return m, nil
+			}
 			if m.showTextInput {
 				m.showTextInput = false
 				go m.uploadAssets(m.textInput.Value(), m.progressCh)
 				return m, nil
 			}
-			if !m.showAssets {
+			if (!m.showAssets) && (m.albumList.SelectedItem() != nil) {
 				selectedAlbum := m.albums[m.albumList.Index()]
 				m.selectedAlbum = selectedAlbum.AlbumName
 				assets, err := fetchAlbumInfo(m.envVars.APIURL, m.envVars.APIKey, selectedAlbum.ID, m.envVars.ContainerMountPath, m.envVars.RealPath)
@@ -254,6 +283,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.albumList.SetSize(msg.Width, msg.Height)
 		m.assetTable.SetWidth(msg.Width)
 		m.assetTable.SetHeight(msg.Height - 5) // Adjust height for header and footer
+		m.windowWidth = msg.Width
 	case progress.FrameMsg:
 		progressModel, cmd := m.progress.Update(msg)
 		m.progress = progressModel.(progress.Model)
@@ -261,6 +291,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case float64:
 		m.uploadProgress = msg
 		return m, m.waitForProgress()
+	case string:
+		if msg == "auth_complete" {
+			return m, nil
+		}
 	}
 
 	var cmd tea.Cmd
@@ -275,10 +309,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if m.state == stateAuth {
+		m.authCodeInput, cmd = m.authCodeInput.Update(msg)
+		return m, cmd
+	}
+
 	return m, cmd
 }
 
 func (m *model) View() string {
+	if m.state == stateAuth {
+		authPrompt := fmt.Sprintf("Visit the URL for the auth dialog:\n%s\n\nEnter the authorization code:", m.authURL)
+		wrappedAuthPrompt := lipgloss.NewStyle().Width(m.windowWidth).Render(wrapString(authPrompt, m.windowWidth))
+
+		return "\n" + wrappedAuthPrompt + "\n" + m.authCodeInput.View() + "\n"
+	}
 	if m.showTextInput {
 		return "\nEnter the name for the new Google Photos album:\n" + m.textInput.View() + "\n"
 	}
@@ -332,6 +377,40 @@ func (m *model) totalSize() int64 {
 	return totalSize
 }
 
+func wrapString(s string, maxLineLength int) string {
+	if maxLineLength <= 0 {
+		return s
+	}
+
+	var result strings.Builder
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return s
+	}
+
+	currentLineLength := 0
+
+	for i, word := range words {
+		wordLength := len(word)
+		if currentLineLength+wordLength > maxLineLength {
+			result.WriteString("\n")
+			currentLineLength = 0
+		} else if currentLineLength > 0 {
+			result.WriteString(" ")
+			currentLineLength++
+		}
+		result.WriteString(word)
+		currentLineLength += wordLength
+
+		// If it's the last word, append a newline if necessary
+		if i == len(words)-1 && currentLineLength > maxLineLength {
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String()
+}
+
 func formatSize(size int64) string {
 	const unit = 1024
 	if size < unit {
@@ -348,36 +427,7 @@ func formatSize(size int64) string {
 func (m *model) uploadAssets(albumName string, progressCh chan<- float64) {
 	ctx := context.Background()
 
-	oauth2Config := oauth2.Config{
-		ClientID:     m.envVars.ClientID,
-		ClientSecret: m.envVars.ClientSecret,
-		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob", // Use for out-of-band authentication
-		Scopes:       []string{"https://www.googleapis.com/auth/photoslibrary"},
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  "https://accounts.google.com/o/oauth2/auth",
-			TokenURL: "https://accounts.google.com/o/oauth2/token",
-		},
-	}
-
-	// Generate URL for the user to visit
-	authURL := oauth2Config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Visit the URL for the auth dialog: %v\n", authURL)
-
-	// Read the authorization code
-	var authCode string
-	fmt.Printf("Enter the authorization code: ")
-	if _, err := fmt.Scan(&authCode); err != nil {
-		log.Fatalf("Error reading authorization code: %v", err)
-	}
-
-	// Exchange authorization code for an access token
-	token, err := oauth2Config.Exchange(ctx, authCode)
-	if err != nil {
-		log.Fatalf("Error exchanging authorization code: %v", err)
-	}
-
-	// Create an authenticated HTTP client
-	tc := oauth2Config.Client(ctx, token)
+	tc := oauth2.NewClient(ctx, oauth2.StaticTokenSource(m.authToken))
 
 	client, err := gphotos.NewClient(tc)
 	if err != nil {
@@ -409,6 +459,53 @@ func (m *model) waitForProgress() tea.Cmd {
 	return func() tea.Msg {
 		return <-m.progressCh
 	}
+}
+
+func (m *model) startAuthorization() tea.Cmd {
+	return func() tea.Msg {
+
+		oauth2Config := oauth2.Config{
+			ClientID:     m.envVars.ClientID,
+			ClientSecret: m.envVars.ClientSecret,
+			RedirectURL:  "urn:ietf:wg:oauth:2.0:oob", // Use for out-of-band authentication
+			Scopes:       []string{"https://www.googleapis.com/auth/photoslibrary"},
+			Endpoint: oauth2.Endpoint{
+				AuthURL:  "https://accounts.google.com/o/oauth2/auth",
+				TokenURL: "https://accounts.google.com/o/oauth2/token",
+			},
+		}
+
+		// Generate URL for the user to visit
+		authURL := oauth2Config.AuthCodeURL("state-token", oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("response_type", "code"))
+		m.authURL = authURL
+		m.state = stateAuth
+
+		return nil
+	}
+}
+
+func (m *model) exchangeAuthCodeForToken(authCode string) {
+	ctx := context.Background()
+
+	oauth2Config := oauth2.Config{
+		ClientID:     m.envVars.ClientID,
+		ClientSecret: m.envVars.ClientSecret,
+		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob", // Use for out-of-band authentication
+		Scopes:       []string{"https://www.googleapis.com/auth/photoslibrary"},
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  "https://accounts.google.com/o/oauth2/auth",
+			TokenURL: "https://accounts.google.com/o/oauth2/token",
+		},
+	}
+
+	// Exchange authorization code for an access token
+	token, err := oauth2Config.Exchange(ctx, authCode)
+	if err != nil {
+		log.Fatalf("Error exchanging authorization code: %v", err)
+	}
+
+	m.authToken = token
+	m.state = stateMain
 }
 
 func main() {
