@@ -1,45 +1,5 @@
 package main
 
-/*
-High-Level Features of the Program
-
-    Album and Asset Management via Terminal UI:
-        Album Listing and Viewing: The program interacts with an external API (an Immich instance) to fetch and display a list of photo albums. Users can navigate and select albums to view the assets (photos and videos) they contain.
-        Asset Filtering: Users can filter the displayed assets by type (photos or videos) or view all assets in the selected album.
-
-    Environment Variable Configuration:
-        The program loads configuration details such as API URLs, API keys, file paths, and OAuth credentials from environment variables to ensure it runs with the correct settings.
-
-    Path Management:
-        The program ensures each asset's path is correctly mapped from a container path to a real file system path, enabling it to locate and manage assets on the local file system accurately.
-
-    Google Photos Integration:
-        OAuth2 Authentication: The program authenticates with the Google Photos API using OAuth2.
-        Album Creation in Google Photos: Users can create a new album in Google Photos by entering an album name.
-        Asset Upload to Google Photos: The program uploads selected assets from the local file system to the newly created Google Photos album.
-
-    Progress Tracking:
-        The program tracks and displays the progress of the upload process to Google Photos, providing users with visual feedback on the operation's status.
-
-How the Program Achieves These Features
-
-    Terminal-Based User Interface:
-        Uses a terminal-based UI framework to create a responsive and interactive experience where users can navigate lists, select items, and initiate actions such as viewing assets and starting uploads.
-
-    Environment Configuration:
-        Loads environment variables to configure the application, encapsulating these details in a structured format for easy access and management throughout the program.
-
-    Path Management:
-        Processes each asset's path to ensure it starts with the expected container mount path and replaces this prefix with the real file system path, allowing accurate location of assets on the local system.
-
-    Google Photos Integration:
-        Sets up OAuth2 configuration using client ID and secret, handling token management for authenticated API requests.
-        Interacts with the Google Photos API to create albums and upload media items, ensuring proper error handling and reporting.
-
-    Progress Tracking:
-        Integrates a progress bar to visually indicate the status of the upload process, updating in real-time to reflect progress.
-*/
-
 import (
 	"context"
 	"errors"
@@ -49,15 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/go-resty/resty/v2"
 	gphotos "github.com/gphotosuploader/google-photos-api-client-go/v3"
 	"github.com/joho/godotenv"
+	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 )
 
@@ -66,10 +21,6 @@ type album struct {
 	AssetCount int    `json:"assetCount"`
 	ID         string `json:"id"`
 }
-
-func (a album) Title() string       { return a.AlbumName }
-func (a album) Description() string { return fmt.Sprintf("%d assets", a.AssetCount) }
-func (a album) FilterValue() string { return a.AlbumName }
 
 type asset struct {
 	OriginalPath string `json:"originalPath"`
@@ -80,36 +31,6 @@ type asset struct {
 	RealFilePath string
 }
 
-type model struct {
-	albums         []album
-	albumList      list.Model
-	assets         []asset
-	showAssets     bool
-	selectedAlbum  string
-	filter         string // "all", "photos", "videos"
-	assetTable     table.Model
-	progress       progress.Model
-	textInput      textinput.Model
-	showTextInput  bool
-	uploadProgress float64
-	envVars        EnvVariables
-	progressCh     chan float64
-	authCodeInput  textinput.Model
-	authURL        string
-	authToken      *oauth2.Token
-	state          programState
-	windowWidth    int
-}
-
-type programState int
-
-const (
-	stateInit programState = iota
-	stateAuth
-	stateMain
-	stateUpload
-)
-
 type EnvVariables struct {
 	APIURL             string
 	APIKey             string
@@ -118,6 +39,8 @@ type EnvVariables struct {
 	ClientID           string
 	ClientSecret       string
 }
+
+var envVars EnvVariables
 
 func loadEnvVariables() EnvVariables {
 	err := godotenv.Load()
@@ -178,237 +101,118 @@ func fetchAlbumInfo(apiURL, apiKey, albumID, containerMountPath, realPath string
 	return assets, nil
 }
 
-func initialModel(envVars EnvVariables) (model, error) {
-	albums, err := fetchAlbums(envVars.APIURL, envVars.APIKey)
+func main() {
+	envVars = loadEnvVariables()
+
+	var rootCmd = &cobra.Command{Use: "photos-cli"}
+
+	var listAlbumsCmd = &cobra.Command{
+		Use:   "list-albums",
+		Short: "List all albums",
+		Run: func(cmd *cobra.Command, args []string) {
+			albums, err := fetchAlbums(envVars.APIURL, envVars.APIKey)
+			if err != nil {
+				log.Fatal(err)
+			}
+			for _, album := range albums {
+				fmt.Printf("%s - %s (%d assets)\n", album.ID, album.AlbumName, album.AssetCount)
+			}
+		},
+	}
+
+	var listAssetsCmd = &cobra.Command{
+		Use:   "list-assets [albumID]",
+		Short: "List all assets in an album",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			albumID := args[0]
+			assets, err := fetchAlbumInfo(envVars.APIURL, envVars.APIKey, albumID, envVars.ContainerMountPath, envVars.RealPath)
+			if err != nil {
+				log.Fatal(err)
+			}
+			for _, asset := range assets {
+				fmt.Printf("%s (%s)\n", filepath.Base(asset.OriginalPath), formatSize(asset.ExifInfo.FileSizeInByte))
+			}
+		},
+	}
+
+	var uploadCmd = &cobra.Command{
+		Use:   "upload [albumName]",
+		Short: "Upload assets to Google Photos",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			albumName := args[0]
+
+			var authCode string
+			fmt.Print("Enter authorization code: ")
+			fmt.Scanln(&authCode)
+			token := exchangeAuthCodeForToken(authCode)
+			uploadAssets(albumName, token)
+		},
+	}
+
+	rootCmd.AddCommand(listAlbumsCmd)
+	rootCmd.AddCommand(listAssetsCmd)
+	rootCmd.AddCommand(uploadCmd)
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// TODO fix google oauth2 authorization
+
+func exchangeAuthCodeForToken(authCode string) *oauth2.Token {
+	ctx := context.Background()
+
+	oauth2Config := oauth2.Config{
+		ClientID:     envVars.ClientID,
+		ClientSecret: envVars.ClientSecret,
+		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob",
+		Scopes:       []string{"https://www.googleapis.com/auth/photoslibrary"},
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  "https://accounts.google.com/o/oauth2/auth",
+			TokenURL: "https://accounts.google.com/o/oauth2/token",
+		},
+	}
+
+	token, err := oauth2Config.Exchange(ctx, authCode)
 	if err != nil {
-		return model{}, err
+		log.Fatalf("Error exchanging authorization code: %v", err)
 	}
-
-	items := []list.Item{}
-	for _, album := range albums {
-		items = append(items, album)
-	}
-
-	const defaultWidth = 0
-	const defaultHeight = 0
-	l := list.New(items, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
-	l.Title = "Select an album"
-
-	p := progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-
-	ti := textinput.New()
-	ti.Placeholder = "Enter album name"
-	ti.Focus()
-
-	authInput := textinput.New()
-	authInput.Placeholder = "Enter authorization code"
-	authInput.Focus()
-
-	progressCh := make(chan float64)
-
-	return model{
-		albums:        albums,
-		albumList:     l,
-		filter:        "all",
-		progress:      p,
-		textInput:     ti,
-		showTextInput: false,
-		envVars:       envVars,
-		progressCh:    progressCh,
-		authCodeInput: authInput,
-		state:         stateInit,
-	}, nil
+	return token
 }
 
-func (m *model) Init() tea.Cmd {
-	return tea.Batch(
-		m.startAuthorization(),
-		m.waitForProgress(),
-	)
-}
+func uploadAssets(albumName string, token *oauth2.Token) {
+	ctx := context.Background()
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
-			if m.state == stateAuth {
-				m.state = stateMain
-				m.exchangeAuthCodeForToken(m.authCodeInput.Value())
-				return m, nil
-			}
-			if m.showTextInput {
-				m.showTextInput = false
-				go m.uploadAssets(m.textInput.Value(), m.progressCh)
-				return m, nil
-			}
-			if (!m.showAssets) && (m.albumList.SelectedItem() != nil) {
-				selectedAlbum := m.albums[m.albumList.Index()]
-				m.selectedAlbum = selectedAlbum.AlbumName
-				assets, err := fetchAlbumInfo(m.envVars.APIURL, m.envVars.APIKey, selectedAlbum.ID, m.envVars.ContainerMountPath, m.envVars.RealPath)
-				if err != nil {
-					log.Fatal(err)
-					return m, nil
-				}
-				m.assets = assets
-				m.showAssets = true
-				m.setupTable()
-			} else {
-				m.showTextInput = true
-			}
-		case "p":
-			if m.showAssets {
-				m.filter = "photos"
-				m.setupTable()
-			}
-		case "v":
-			if m.showAssets {
-				m.filter = "videos"
-				m.setupTable()
-			}
-		case "a":
-			if m.showAssets {
-				m.filter = "all"
-				m.setupTable()
-			}
-		case "q":
-			if m.showAssets {
-				m.showAssets = false
-				m.filter = "all"
-			} else {
-				return m, tea.Quit
-			}
+	tc := oauth2.NewClient(ctx, oauth2.StaticTokenSource(token))
+
+	client, err := gphotos.NewClient(tc)
+	if err != nil {
+		log.Fatalf("Error creating Google Photos client: %v", err)
+	}
+
+	album, err := client.Albums.Create(ctx, albumName)
+	if err != nil {
+		log.Fatalf("Error creating album: %v", err)
+	}
+
+	assets, err := fetchAlbumInfo(envVars.APIURL, envVars.APIKey, album.ID, envVars.ContainerMountPath, envVars.RealPath)
+	if err != nil {
+		log.Fatalf("Error fetching album info: %v", err)
+	}
+
+	totalAssets := len(assets)
+	for i, asset := range assets {
+		uploadedMediaItem, err := client.UploadToAlbum(ctx, album.ID, asset.RealFilePath)
+
+		if err != nil || uploadedMediaItem == nil {
+			log.Fatalf("Error uploading media items: %v", err)
 		}
-	case tea.WindowSizeMsg:
-		m.albumList.SetSize(msg.Width, msg.Height)
-		m.assetTable.SetWidth(msg.Width)
-		m.assetTable.SetHeight(msg.Height - 5) // Adjust height for header and footer
-		m.windowWidth = msg.Width
-	case progress.FrameMsg:
-		progressModel, cmd := m.progress.Update(msg)
-		m.progress = progressModel.(progress.Model)
-		return m, cmd
-	case float64:
-		m.uploadProgress = msg
-		return m, m.waitForProgress()
-	case string:
-		if msg == "auth_complete" {
-			return m, nil
-		}
+
+		progress := float64(i+1) / float64(totalAssets)
+		fmt.Printf("Upload progress: %.2f%%\n", progress*100)
 	}
-
-	var cmd tea.Cmd
-	if m.showAssets {
-		m.assetTable, cmd = m.assetTable.Update(msg)
-	} else {
-		m.albumList, cmd = m.albumList.Update(msg)
-	}
-
-	if m.showTextInput {
-		m.textInput, cmd = m.textInput.Update(msg)
-		return m, cmd
-	}
-
-	if m.state == stateAuth {
-		m.authCodeInput, cmd = m.authCodeInput.Update(msg)
-		return m, cmd
-	}
-
-	return m, cmd
-}
-
-func (m *model) View() string {
-	if m.state == stateAuth {
-		authPrompt := fmt.Sprintf("Visit the URL for the auth dialog:\n%s\n\nEnter the authorization code:", m.authURL)
-		wrappedAuthPrompt := lipgloss.NewStyle().Width(m.windowWidth).Render(wrapString(authPrompt, m.windowWidth))
-
-		return "\n" + wrappedAuthPrompt + "\n" + m.authCodeInput.View() + "\n"
-	}
-	if m.showTextInput {
-		return "\nEnter the name for the new Google Photos album:\n" + m.textInput.View() + "\n"
-	}
-	if m.showAssets {
-		header := fmt.Sprintf("Assets in selected album (%s):\n\n", m.selectedAlbum)
-		numAssets := len(m.filteredAssets())
-		totalSize := fmt.Sprintf("\nNumber of assets: %d, Total size: %s\n", numAssets, formatSize(m.totalSize()))
-		instructions := "\nPress 'q' to go back, 'p' to show photos, 'v' to show videos, 'a' to show all, 'enter' to upload assets."
-		return header + m.assetTable.View() + totalSize + instructions + "\n" + m.progress.ViewAs(m.uploadProgress)
-	}
-	return "\n" + m.albumList.View()
-}
-
-func (m *model) setupTable() {
-	columns := []table.Column{
-		{Title: "Filename", Width: 30},
-		{Title: "Size", Width: 10},
-		{Title: "Path", Width: 50},
-	}
-
-	rows := []table.Row{}
-	for _, asset := range m.filteredAssets() {
-		filename := filepath.Base(asset.OriginalPath)
-		size := formatSize(asset.ExifInfo.FileSizeInByte)
-		row := table.Row{filename, size, asset.OriginalPath}
-		rows = append(rows, row)
-	}
-
-	m.assetTable = table.New(table.WithColumns(columns), table.WithRows(rows), table.WithFocused(true))
-	m.assetTable.SetStyles(table.DefaultStyles())
-}
-
-func (m *model) filteredAssets() []asset {
-	if m.filter == "all" {
-		return m.assets
-	}
-	filtered := []asset{}
-	for _, asset := range m.assets {
-		if (m.filter == "photos" && asset.Type == "IMAGE") || (m.filter == "videos" && asset.Type == "VIDEO") {
-			filtered = append(filtered, asset)
-		}
-	}
-	return filtered
-}
-
-func (m *model) totalSize() int64 {
-	var totalSize int64
-	for _, asset := range m.filteredAssets() {
-		totalSize += asset.ExifInfo.FileSizeInByte
-	}
-	return totalSize
-}
-
-func wrapString(s string, maxLineLength int) string {
-	if maxLineLength <= 0 {
-		return s
-	}
-
-	var result strings.Builder
-	words := strings.Fields(s)
-	if len(words) == 0 {
-		return s
-	}
-
-	currentLineLength := 0
-
-	for i, word := range words {
-		wordLength := len(word)
-		if currentLineLength+wordLength > maxLineLength {
-			result.WriteString("\n")
-			currentLineLength = 0
-		} else if currentLineLength > 0 {
-			result.WriteString(" ")
-			currentLineLength++
-		}
-		result.WriteString(word)
-		currentLineLength += wordLength
-
-		// If it's the last word, append a newline if necessary
-		if i == len(words)-1 && currentLineLength > maxLineLength {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
 }
 
 func formatSize(size int64) string {
@@ -422,100 +226,4 @@ func formatSize(size int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
-}
-
-func (m *model) uploadAssets(albumName string, progressCh chan<- float64) {
-	ctx := context.Background()
-
-	tc := oauth2.NewClient(ctx, oauth2.StaticTokenSource(m.authToken))
-
-	client, err := gphotos.NewClient(tc)
-	if err != nil {
-		log.Fatalf("Error creating Google Photos client: %v", err)
-	}
-
-	album, err := client.Albums.Create(ctx, albumName)
-	if err != nil {
-		log.Fatalf("Error creating album: %v", err)
-	}
-
-	totalAssets := len(m.assets)
-	for i, asset := range m.assets {
-		uploadedMediaItem, err := client.UploadToAlbum(ctx, album.ID, asset.RealFilePath)
-
-		if err != nil || uploadedMediaItem == nil {
-			log.Fatalf("Error uploading media items: %v", err)
-		}
-
-		progress := float64(i+1) / float64(totalAssets)
-		progressCh <- progress
-	}
-
-	m.uploadProgress = 1.0
-	close(progressCh)
-}
-
-func (m *model) waitForProgress() tea.Cmd {
-	return func() tea.Msg {
-		return <-m.progressCh
-	}
-}
-
-func (m *model) startAuthorization() tea.Cmd {
-	return func() tea.Msg {
-
-		oauth2Config := oauth2.Config{
-			ClientID:     m.envVars.ClientID,
-			ClientSecret: m.envVars.ClientSecret,
-			RedirectURL:  "urn:ietf:wg:oauth:2.0:oob", // Use for out-of-band authentication
-			Scopes:       []string{"https://www.googleapis.com/auth/photoslibrary"},
-			Endpoint: oauth2.Endpoint{
-				AuthURL:  "https://accounts.google.com/o/oauth2/auth",
-				TokenURL: "https://accounts.google.com/o/oauth2/token",
-			},
-		}
-
-		// Generate URL for the user to visit
-		authURL := oauth2Config.AuthCodeURL("state-token", oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("response_type", "code"))
-		m.authURL = authURL
-		m.state = stateAuth
-
-		return nil
-	}
-}
-
-func (m *model) exchangeAuthCodeForToken(authCode string) {
-	ctx := context.Background()
-
-	oauth2Config := oauth2.Config{
-		ClientID:     m.envVars.ClientID,
-		ClientSecret: m.envVars.ClientSecret,
-		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob", // Use for out-of-band authentication
-		Scopes:       []string{"https://www.googleapis.com/auth/photoslibrary"},
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  "https://accounts.google.com/o/oauth2/auth",
-			TokenURL: "https://accounts.google.com/o/oauth2/token",
-		},
-	}
-
-	// Exchange authorization code for an access token
-	token, err := oauth2Config.Exchange(ctx, authCode)
-	if err != nil {
-		log.Fatalf("Error exchanging authorization code: %v", err)
-	}
-
-	m.authToken = token
-	m.state = stateMain
-}
-
-func main() {
-	envVars := loadEnvVariables()
-	m, err := initialModel(envVars)
-	if err != nil {
-		log.Fatal(err)
-	}
-	p := tea.NewProgram(&m)
-	if err := p.Start(); err != nil {
-		log.Fatal(err)
-	}
 }
