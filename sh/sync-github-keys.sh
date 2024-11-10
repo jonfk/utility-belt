@@ -35,23 +35,81 @@ backup_auth_keys() {
     cp "$AUTH_KEYS" "$AUTH_KEYS.backup.$(date +%Y%m%d_%H%M%S)"
 }
 
+# Function to normalize a key by removing comments and extra spaces
+normalize_key() {
+    echo "$1" | awk '{print $1, $2}' | tr -s ' '
+}
+
+# Function to get key type and data (first two fields)
+get_key_data() {
+    echo "$1" | awk '{print $1, $2}'
+}
+
 # Main sync function
 sync_keys() {
     local temp_output=$(mktemp)
+    local seen_keys=()
+    local github_keys=()
     
-    # Process existing authorized_keys, keeping non-GitHub keys
+    # Read GitHub keys into array and normalize them
+    while IFS= read -r key || [[ -n "$key" ]]; do
+        if [[ -n "$key" ]]; then
+            github_keys+=("$(normalize_key "$key")")
+        fi
+    done < "$TEMP_FILE"
+
+    # Process existing authorized_keys
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" != *"$GITHUB_COMMENT"* ]] && [[ -n "$line" ]]; then
-            echo "$line" >> "$temp_output"
+        if [[ -n "$line" && "$line" != \#* ]]; then
+            local normalized_key=$(normalize_key "$line")
+            local key_data=$(get_key_data "$line")
+            local is_duplicate=0
+            local is_github_key=0
+
+            # Check if this key is in GitHub keys
+            for github_key in "${github_keys[@]}"; do
+                if [[ "$normalized_key" == "$github_key" ]]; then
+                    is_github_key=1
+                    break
+                fi
+            done
+
+            # Check if we've seen this key before
+            for seen_key in "${seen_keys[@]}"; do
+                if [[ "$normalized_key" == "$seen_key" ]]; then
+                    is_duplicate=1
+                    break
+                fi
+            done
+
+            # Keep the key if it's not a duplicate and not from GitHub
+            if [[ $is_duplicate -eq 0 && $is_github_key -eq 0 ]]; then
+                echo "$line" >> "$temp_output"
+                seen_keys+=("$normalized_key")
+            fi
+        elif [[ -n "$line" ]]; then
+            # Preserve comments that aren't GitHub markers
+            if [[ "$line" != *"$GITHUB_COMMENT"* ]]; then
+                echo "$line" >> "$temp_output"
+            fi
         fi
     done < "$AUTH_KEYS"
 
     # Add current GitHub keys with comment
-    while IFS= read -r key || [[ -n "$key" ]]; do
-        if [[ -n "$key" ]]; then
-            echo "$key $GITHUB_COMMENT" >> "$temp_output"
+    for github_key in "${github_keys[@]}"; do
+        local is_duplicate=0
+        for seen_key in "${seen_keys[@]}"; do
+            if [[ "$github_key" == "$seen_key" ]]; then
+                is_duplicate=1
+                break
+            fi
+        done
+
+        if [[ $is_duplicate -eq 0 ]]; then
+            echo "$github_key $GITHUB_COMMENT" >> "$temp_output"
+            seen_keys+=("$github_key")
         fi
-    done < "$TEMP_FILE"
+    done
 
     # Replace authorized_keys with new content
     mv "$temp_output" "$AUTH_KEYS"
@@ -73,7 +131,7 @@ echo "Creating backup of authorized_keys..."
 backup_auth_keys
 
 # Sync keys
-echo "Syncing keys..."
+echo "Syncing and deduplicating keys..."
 sync_keys
 
 # Cleanup
