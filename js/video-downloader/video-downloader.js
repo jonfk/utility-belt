@@ -7,7 +7,6 @@ const fs = require('fs');
 const path = require('path');
 
 async function getBrowser() {
-    // Launch Chrome using chrome-launcher
     const chromePath = await chrome.getChromePath();
     return puppeteer.launch({
         executablePath: chromePath,
@@ -15,7 +14,12 @@ async function getBrowser() {
     });
 }
 
-async function processTitle(title) {
+async function processTitle(title, prefix = '') {
+    // Add prefix if provided
+    if (prefix) {
+        title = `${prefix} ${title}`;
+    }
+    
     // Remove URLs
     title = title.replace(/(?:https?|ftp):\/\/[\n\S]+/g, '');
     
@@ -109,13 +113,39 @@ async function getCanonicalUrl(videoSrc) {
     }
 }
 
-async function main() {
-    if (process.argv.length < 3) {
-        console.error('Please provide a URL as an argument');
-        process.exit(1);
-    }
+function getArgs() {
+    const isPackaged = !process.argv[0].endsWith('node') && !process.argv[0].endsWith('node.exe');
+    const args = isPackaged ? process.argv.slice(1) : process.argv.slice(2);
+    return { args, isPackaged };
+}
 
-    const url = process.argv[2];
+function showHelp(isPackaged) {
+    const command = isPackaged ? 'video-downloader' : 'node script.js';
+    console.log(`
+Usage: ${command} [URL] [prefix]
+    URL     The video page URL to download from
+    prefix  Optional text to prepend to the filename
+
+Options:
+    -h, --help  Show this help message
+
+Example:
+    ${command} https://example.com/video "My Video"
+`);
+    process.exit(0);
+}
+
+async function main() {
+    const { args, isPackaged } = getArgs();
+    
+    if (args.length < 1 || args[0] === '-h' || args[0] === '--help') {
+        showHelp(isPackaged);
+    }
+    
+    const url = args[0];
+    const prefix = args[1] || '';
+
+    console.log(`url:${url}\nprefix: ${prefix}`);
     const browser = await getBrowser();
     
     try {
@@ -140,8 +170,8 @@ async function main() {
         // Get canonical URL
         const canonicalUrl = await getCanonicalUrl(videoSrc);
         
-        // Process the title
-        const processedTitle = await processTitle(title);
+        // Process the title with optional prefix
+        const processedTitle = await processTitle(title, prefix);
         
         // Create output filename
         const outputPath = path.join(process.cwd(), `${processedTitle}.mp4`);
