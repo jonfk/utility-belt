@@ -74,6 +74,20 @@ async function downloadVideo(url, outputPath) {
             const bytesPerSec = (downloaded - lastDownloaded) / timeDiff;
             const percent = (downloaded / totalLength) * 100;
             
+            // Calculate remaining bytes and time
+            const remainingBytes = totalLength - downloaded;
+            const estimatedSeconds = remainingBytes / bytesPerSec;
+            
+            // Format estimated time remaining
+            let timeRemaining;
+            if (estimatedSeconds > 3600) {
+                timeRemaining = `${Math.round(estimatedSeconds / 3600)}h ${Math.round((estimatedSeconds % 3600) / 60)}m`;
+            } else if (estimatedSeconds > 60) {
+                timeRemaining = `${Math.round(estimatedSeconds / 60)}m ${Math.round(estimatedSeconds % 60)}s`;
+            } else {
+                timeRemaining = `${Math.round(estimatedSeconds)}s`;
+            }
+            
             // Calculate human-readable speed
             let speed;
             if (bytesPerSec > 1024 * 1024) {
@@ -84,8 +98,8 @@ async function downloadVideo(url, outputPath) {
                 speed = `${bytesPerSec.toFixed(2)} B/s`;
             }
             
-            // Clear line and update progress
-            process.stdout.write(`\rProgress: ${percent.toFixed(1)}% | Speed: ${speed}`);
+            // Clear line and update progress with time remaining
+            process.stdout.write(`\rProgress: ${percent.toFixed(1)}% | Speed: ${speed} | ETA: ${timeRemaining}`);
             
             lastLogTime = now;
             lastDownloaded = downloaded;
