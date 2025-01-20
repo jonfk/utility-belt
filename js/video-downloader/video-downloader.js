@@ -5,6 +5,7 @@ const moment = require('moment');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const csv = require('csv-parse/sync');
 
 async function getBrowser() {
     const chromePath = await chrome.getChromePath();
@@ -13,12 +14,37 @@ async function getBrowser() {
         headless: "new"
     });
 }
-
 async function processTitle(title, prefix = '') {
+    // Log original title
+    console.log('Original title:', title);
+    
     // Add prefix if provided
     if (prefix) {
         title = `${prefix} ${title}`;
     }
+    
+    // Define promotional content patterns
+    const promotionalPatterns = [
+        // Square bracket enclosed promotional messages containing "backup", "visit", "watch"
+        /\[[^\]]*(?:backup|visit|watch)[^\]]*\]/i,
+        
+        // Backup/Watch/Download variations with quality indicators
+        /(?:backup|watch|download)(?:\s*\/\s*(?:watch|download))?\s*(?:hd|fhd|full\s*hd)(?:\s*:)?/i,
+        
+        // "Backup HD on Link" variations
+        /backup\s+(?:hd|fhd|full\s*hd)\s+on\s+link/i,
+        
+        // Visit blog/website messages
+        /(?:also\s+)?visit\s+(?:my\s+)?(?:blog|website)\s*[-:]?\s*(?:https?:\/\/[^\s]+)?(?:\s+for\s+backup[^a-z]+)/i,
+        
+        // Watch Online quality variations
+        /watch\s+online\s+(?:hd|fhd|full\s*hd)(?:\s*:)?/i
+    ];
+    
+    // Remove promotional patterns
+    promotionalPatterns.forEach(pattern => {
+        title = title.replace(pattern, '');
+    });
     
     // Remove URLs
     title = title.replace(/(?:https?|ftp):\/\/[\n\S]+/g, '');
@@ -130,41 +156,87 @@ async function getCanonicalUrl(videoSrc) {
 function getArgs() {
     const isPackaged = !process.argv[0].endsWith('node') && !process.argv[0].endsWith('node.exe');
     const args = isPackaged ? process.argv.slice(1) : process.argv.slice(2);
-    return { args, isPackaged };
+    
+    // Parse for --file parameter
+    const fileIndex = args.findIndex(arg => arg === '--file');
+    if (fileIndex !== -1 && fileIndex + 1 < args.length) {
+        return {
+            isPackaged,
+            mode: 'file',
+            filePath: args[fileIndex + 1]
+        };
+    }
+    
+    // Regular URL mode
+    return {
+        isPackaged,
+        mode: 'url',
+        url: args[0],
+        prefix: args[1] || ''
+    };
 }
 
 function showHelp(isPackaged) {
     const command = isPackaged ? 'video-downloader' : 'node script.js';
     console.log(`
-Usage: ${command} [URL] [prefix]
-    URL     The video page URL to download from
-    prefix  Optional text to prepend to the filename
+Usage: 
+    ${command} [URL] [prefix]
+    ${command} --file [filepath]
+
+Arguments:
+    URL        The video page URL to download from
+    prefix     Optional text to prepend to the filename
+    filepath   Path to a CSV file containing URLs and optional prefixes
 
 Options:
     -h, --help  Show this help message
+    --file      Process multiple URLs from a CSV file
 
-Example:
+CSV File Format:
+    The CSV file should have a header row with "url,prefix"
+    The prefix column is optional
+
+Examples:
     ${command} https://example.com/video "My Video"
+    ${command} --file videos.csv
 `);
     process.exit(0);
 }
 
-async function main() {
-    const { args, isPackaged } = getArgs();
-    
-    if (args.length < 1 || args[0] === '-h' || args[0] === '--help') {
-        showHelp(isPackaged);
+async function processUrlList(filePath) {
+    try {
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        const records = csv.parse(fileContent, {
+            columns: true,
+            skip_empty_lines: true,
+            trim: true
+        });
+        
+        return records.map(record => ({
+            url: record.url,
+            prefix: record.prefix || ''
+        }));
+    } catch (error) {
+        throw new Error(`Failed to parse CSV file: ${error.message}`);
     }
-    
-    const url = args[0];
-    const prefix = args[1] || '';
+}
 
-    console.log(`url:${url}\nprefix: ${prefix}`);
-    const browser = await getBrowser();
+async function writeErrorsToFile(failedItems, originalFilePath) {
+    const errorFilePath = `${originalFilePath}.errors.csv`;
+    const header = 'url,prefix\n';
+    const content = failedItems.map(item => {
+        const prefix = item.prefix ? `"${item.prefix}"` : '';
+        return `"${item.url}",${prefix}`;
+    }).join('\n');
+    
+    fs.writeFileSync(errorFilePath, header + content, 'utf-8');
+    console.log(`\nFailed entries have been written to: ${errorFilePath}`);
+}
+
+async function processVideo(url, prefix, browser) {
+    const page = await browser.newPage();
     
     try {
-        const page = await browser.newPage();
-        
         // Navigate to the page
         await page.goto(url, { waitUntil: 'networkidle0' });
         
@@ -190,7 +262,7 @@ async function main() {
         // Create output filename
         const outputPath = path.join(process.cwd(), `${processedTitle}.mp4`);
         
-        console.log('Downloading video...');
+        console.log('\nProcessing video...');
         console.log('Title:', processedTitle);
         console.log('Source:', canonicalUrl);
         console.log('Output:', outputPath);
@@ -200,9 +272,52 @@ async function main() {
         
         console.log('Download complete!');
         
-    } catch (error) {
-        console.error('An error occurred:', error.message);
-        process.exit(1);
+    } finally {
+        await page.close();
+    }
+}
+
+async function main() {
+    const args = getArgs();
+    
+    if (!args.mode || args.mode === 'url' && !args.url || args.url === '-h' || args.url === '--help') {
+        showHelp(args.isPackaged);
+    }
+    
+    const browser = await getBrowser();
+    
+    try {
+        if (args.mode === 'file') {
+            const urlList = await processUrlList(args.filePath);
+            console.log(`Found ${urlList.length} URLs to process`);
+            
+            const failedItems = [];
+            
+            for (const [index, item] of urlList.entries()) {
+                console.log(`\nProcessing item ${index + 1}/${urlList.length}`);
+                console.log(`URL: ${item.url}`);
+                if (item.prefix) console.log(`Prefix: ${item.prefix}`);
+                
+                try {
+                    await processVideo(item.url, item.prefix, browser);
+                } catch (error) {
+                    console.error(`Error processing ${item.url}:`, error.message);
+                    failedItems.push({
+                        url: item.url,
+                        prefix: item.prefix,
+                        error: error.message
+                    });
+                    continue;
+                }
+            }
+            
+            if (failedItems.length > 0) {
+                console.log(`\n${failedItems.length} items failed to process`);
+                await writeErrorsToFile(failedItems, args.filePath);
+            }
+        } else {
+            await processVideo(args.url, args.prefix, browser);
+        }
     } finally {
         await browser.close();
     }
