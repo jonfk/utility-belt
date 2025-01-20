@@ -15,6 +15,7 @@ async function getBrowser() {
     });
 }
 
+
 async function processTitle(title, prefix = '') {
     // Log original title
     console.log('Original title:', title);
@@ -44,11 +45,23 @@ async function processTitle(title, prefix = '') {
     
     // Define patterns for quality indicators and redundant tags
     const cleanupPatterns = [
-        // Quality and resolution indicators
-        /\b(?:720|720p|1080|1080p|hd(?:porn)?)\b/gi,
+        // Resolution indicators (standalone only)
+        /\b(?:720p?|1080p?|1440p|2160p|480p|360p)\b/gi,
+        
+        // Quality indicators (when not part of other words)
+        /\b(?:4k|8k|hd|uhd|qhd|full\s*hd)(?:\s+quality)?\b/gi,
+        
+        // Social media and verification markers (when promotional)
+        /\b(?:@premium|@verified|#verified|#premium)\b/gi,
         
         // Common tags and low-information strings
-        /(?:^|\s)#?(?:ghost|internallink|link|dailyvids|0dayporn)\b/gi
+        /(?:^|\s)#?(?:ghost|internallink|link|dailyvids|0dayporn|freeporn|premiumcontent)\b/gi,
+        
+        // Adult content markers
+        /\b(?:xxx|adultvideo|porn(?:video)?)\b/gi,
+        
+        // Common spam-related terms (only when standalone)
+        /\b(?:click\s*here|subscribe\s*now|stream\s*here)\b/gi
     ];
     
     // Remove promotional patterns
@@ -75,7 +88,7 @@ async function processTitle(title, prefix = '') {
     let extractedDate = '';
     
     if (dateMatch) {
-        const parsedDate = moment(dateMatch[0], ['YYYY-MM-DD', 'DD-MM-YYYY', 'MM-DD-YYYY', 'DD.MM.YYYY'], true);
+        const parsedDate = moment(dateMatch[0], ['YYYY-MM-DD', 'DD-MM-YYYY', 'MM-DD-YYYY', 'DD.MM.YYYY', 'YYYY/MM/DD', 'YYYY.MM.DD'], true);
         if (parsedDate.isValid()) {
             extractedDate = parsedDate.format('YYYY-MM-DD');
             // Remove the date from the title
