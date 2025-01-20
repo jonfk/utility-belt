@@ -14,6 +14,7 @@ async function getBrowser() {
         headless: "new"
     });
 }
+
 async function processTitle(title, prefix = '') {
     // Log original title
     console.log('Original title:', title);
@@ -41,13 +42,30 @@ async function processTitle(title, prefix = '') {
         /watch\s+online\s+(?:hd|fhd|full\s*hd)(?:\s*:)?/i
     ];
     
+    // Define patterns for quality indicators and redundant tags
+    const cleanupPatterns = [
+        // Quality and resolution indicators
+        /\b(?:720|720p|1080|1080p|hd(?:porn)?)\b/gi,
+        
+        // Common tags and low-information strings
+        /(?:^|\s)#?(?:ghost|internallink|link|dailyvids|0dayporn)\b/gi
+    ];
+    
     // Remove promotional patterns
     promotionalPatterns.forEach(pattern => {
         title = title.replace(pattern, '');
     });
     
+    // Remove quality indicators and redundant tags
+    cleanupPatterns.forEach(pattern => {
+        title = title.replace(pattern, '');
+    });
+    
     // Remove URLs
     title = title.replace(/(?:https?|ftp):\/\/[\n\S]+/g, '');
+    
+    // Clean up multiple spaces
+    title = title.replace(/\s+/g, ' ');
     
     // Trim whitespace
     title = title.trim();
