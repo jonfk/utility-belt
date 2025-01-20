@@ -88,7 +88,7 @@ async function processTitle(title, prefix = '') {
     let extractedDate = '';
     
     if (dateMatch) {
-        const parsedDate = moment(dateMatch[0], ['YYYY-MM-DD', 'DD-MM-YYYY', 'MM-DD-YYYY', 'DD.MM.YYYY', 'YYYY/MM/DD', 'YYYY.MM.DD'], true);
+        const parsedDate = moment(dateMatch[0], ['YYYY-MM-DD', 'DD-MM-YYYY', 'MM-DD-YYYY', 'DD.MM.YYYY', 'YYYY/MM/DD', 'YYYY.MM.DD', 'YY MM DD'], true);
         if (parsedDate.isValid()) {
             extractedDate = parsedDate.format('YYYY-MM-DD');
             // Remove the date from the title
