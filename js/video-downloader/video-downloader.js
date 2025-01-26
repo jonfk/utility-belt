@@ -297,6 +297,11 @@ async function processVideo(url, prefix, browser) {
         console.log('Title:', processedTitle);
         console.log('Source:', canonicalUrl);
         console.log('Output:', outputPath);
+
+        if (fs.existsSync(outputPath)) {
+            console.log('\x1b[33m%s\x1b[0m', `⚠️ WARNING: File "${processedTitle}.mp4" already exists - skipping download`);
+            return;
+        }
         
         // Download the video
         await downloadVideo(canonicalUrl, outputPath);
