@@ -466,19 +466,16 @@ async fn process_single_file(
     let file_hash = calculate_file_hash(file_path)?;
 
     // Check if this hash already exists in the database (duplicate)
-    match db.hash_exists(&file_hash).await {
-        Ok(true) => {
-            return Ok(CopyResult::Skipped(
-                "duplicate content (hash exists)".to_string(),
-            ));
-        }
-        Ok(false) => {
-            // Not a duplicate, proceed with copy
-        }
-        Err(e) => {
-            eprintln!("WARNING: Database error checking hash existence: {:?}", e);
-            // Continue with copy operation despite database error
-        }
+    let hash_exists = db
+        .hash_exists(&file_hash)
+        .await
+        .change_context(AppError::DB)
+        .attach_printable_lazy(|| format!("file={file_path}"))?;
+
+    if hash_exists {
+        return Ok(CopyResult::Skipped(
+            "duplicate content (hash exists)".to_string(),
+        ));
     }
 
     if dry_run {
