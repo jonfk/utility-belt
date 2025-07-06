@@ -36,17 +36,6 @@ A Rust CLI program that moves photo files from a source directory to a target di
 - Avoid recomputing hashes unnecessarily
 - Handle target directory changes between runs
 
-## Database Schema
-
-CREATE TABLE file_hashes (
-id INTEGER PRIMARY KEY,
-file_path TEXT NOT NULL UNIQUE,
-hash TEXT NOT NULL,
-last_modified INTEGER NOT NULL
-);
-
-CREATE INDEX idx_hash ON file_hashes(hash);
-
 ## CLI Interface
 
 ### Arguments
@@ -90,6 +79,7 @@ CREATE INDEX idx_hash ON file_hashes(hash);
 - sqlx for persistence to sqlite 
 - sha2 for hashing with sha-256
 - tokio async runtime
+- walkdir for directory traversal and iterating over files
 - error-stack for high level error reporting and returning errors externally to users
 - snafu to create specific errors from low level errors
 - camino for utf8 paths. We can assume all the paths are utf8 since they are generally from devices that support utf8 such as iPhone, cameras, etc. If we encounter a non-utf8 path, we return and error and exit.
