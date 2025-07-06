@@ -1,0 +1,31 @@
+# List available recipes
+default:
+    @just --list
+
+# Cross compile to Linux x86_64
+cross-linux:
+    cross build --target x86_64-unknown-linux-gnu --release
+
+# Build for current platform
+build:
+    cargo build --release
+
+# Run tests
+test:
+    cargo test
+
+# Check code without building
+check:
+    cargo check
+
+# Format code
+fmt:
+    cargo fmt
+
+# Run clippy linter
+clippy:
+    cargo clippy -- -D warnings
+
+# Clean build artifacts
+clean:
+    cargo clean
