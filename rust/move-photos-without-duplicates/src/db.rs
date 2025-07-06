@@ -8,10 +8,10 @@ use std::time::SystemTime;
 pub enum DatabaseError {
     #[snafu(display("Failed to connect to database"))]
     Connection { source: sqlx::Error },
-    
+
     #[snafu(display("Failed to run migration"))]
     Migration { source: sqlx::Error },
-    
+
     #[snafu(display("Failed to execute query"))]
     Query { source: sqlx::Error },
 }
@@ -48,20 +48,20 @@ pub struct Database {
 impl Database {
     pub async fn new(db_path: &Utf8PathBuf) -> Result<Self, DatabaseError> {
         let database_url = format!("sqlite:{}", db_path);
-        
+
         let pool = SqlitePool::connect(&database_url)
             .await
             .change_context(DatabaseError::Connection)?;
-        
+
         // Run migration
         sqlx::query(MIGRATION_SQL)
             .execute(&pool)
             .await
             .change_context(DatabaseError::Migration)?;
-        
+
         Ok(Database { pool })
     }
-    
+
     /// Insert or update a file hash entry
     pub async fn upsert_file_hash(
         &self,
@@ -70,15 +70,13 @@ impl Database {
         file_size: u64,
         last_modified: SystemTime,
     ) -> Result<(), DatabaseError> {
-        let filename = file_path
-            .file_name()
-            .unwrap_or("unknown");
-        
+        let filename = file_path.file_name().unwrap_or("unknown");
+
         let last_modified_secs = last_modified
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        
+
         sqlx::query(
             r#"
             INSERT INTO file_hashes (file_path, filename, hash, file_size, last_modified)
@@ -98,10 +96,10 @@ impl Database {
         .execute(&self.pool)
         .await
         .change_context(DatabaseError::Query)?;
-        
+
         Ok(())
     }
-    
+
     /// Check if a hash already exists in the database
     pub async fn hash_exists(&self, hash: &str) -> Result<bool, DatabaseError> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM file_hashes WHERE hash = ?")
@@ -109,11 +107,11 @@ impl Database {
             .fetch_one(&self.pool)
             .await
             .change_context(DatabaseError::Query)?;
-        
+
         let count: i64 = row.get("count");
         Ok(count > 0)
     }
-    
+
     /// Get all file paths that have the same hash
     pub async fn get_files_with_hash(&self, hash: &str) -> Result<Vec<Utf8PathBuf>, DatabaseError> {
         let rows = sqlx::query("SELECT file_path FROM file_hashes WHERE hash = ?")
@@ -121,7 +119,7 @@ impl Database {
             .fetch_all(&self.pool)
             .await
             .change_context(DatabaseError::Query)?;
-        
+
         let paths = rows
             .into_iter()
             .map(|row| {
@@ -129,18 +127,21 @@ impl Database {
                 Utf8PathBuf::from(path_str)
             })
             .collect();
-        
+
         Ok(paths)
     }
-    
+
     /// Get all files with the same filename (regardless of path)
-    pub async fn get_files_with_filename(&self, filename: &str) -> Result<Vec<Utf8PathBuf>, DatabaseError> {
+    pub async fn get_files_with_filename(
+        &self,
+        filename: &str,
+    ) -> Result<Vec<Utf8PathBuf>, DatabaseError> {
         let rows = sqlx::query("SELECT file_path FROM file_hashes WHERE filename = ?")
             .bind(filename)
             .fetch_all(&self.pool)
             .await
             .change_context(DatabaseError::Query)?;
-        
+
         let paths = rows
             .into_iter()
             .map(|row| {
@@ -148,10 +149,10 @@ impl Database {
                 Utf8PathBuf::from(path_str)
             })
             .collect();
-        
+
         Ok(paths)
     }
-    
+
     /// Remove entries for files that no longer exist or have been modified
     pub async fn remove_stale_entry(&self, file_path: &Utf8PathBuf) -> Result<(), DatabaseError> {
         sqlx::query("DELETE FROM file_hashes WHERE file_path = ?")
@@ -159,10 +160,10 @@ impl Database {
             .execute(&self.pool)
             .await
             .change_context(DatabaseError::Query)?;
-        
+
         Ok(())
     }
-    
+
     /// Get file hash entry if it exists and is current
     pub async fn get_file_hash(
         &self,
@@ -173,18 +174,16 @@ impl Database {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        
-        let row = sqlx::query(
-            "SELECT hash, last_modified FROM file_hashes WHERE file_path = ?"
-        )
-        .bind(file_path.as_str())
-        .fetch_optional(&self.pool)
-        .await
-        .change_context(DatabaseError::Query)?;
-        
+
+        let row = sqlx::query("SELECT hash, last_modified FROM file_hashes WHERE file_path = ?")
+            .bind(file_path.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .change_context(DatabaseError::Query)?;
+
         if let Some(row) = row {
             let stored_modified: i64 = row.get("last_modified");
-            
+
             // Only return hash if the file hasn't been modified
             if stored_modified == current_modified_secs {
                 let hash: String = row.get("hash");
