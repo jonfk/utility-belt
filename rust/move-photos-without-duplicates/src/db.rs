@@ -1,19 +1,34 @@
 use camino::Utf8PathBuf;
-use error_stack::{Result, ResultExt};
-use snafu::prelude::*;
+use error_stack::{Report, Result, ResultExt};
 use sqlx::{Row, SqlitePool};
 use std::time::SystemTime;
+use thiserror::Error;
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, Error)]
 pub enum DatabaseError {
-    #[snafu(display("Failed to connect to database"))]
-    Connection { source: sqlx::Error },
+    #[error("Failed to connect to database")]
+    Connection,
 
-    #[snafu(display("Failed to run migration"))]
-    Migration { source: sqlx::Error },
+    #[error("Failed to run migration")]
+    Migration,
 
-    #[snafu(display("Failed to execute query"))]
-    Query { source: sqlx::Error },
+    #[error("Failed to insert file hash")]
+    Insert,
+
+    #[error("Failed to query hash")]
+    QueryHashExists,
+
+    #[error("Failed to query file hash")]
+    QueryGetFileHash,
+
+    #[error("Failed to delete file hash")]
+    Delete,
+
+    #[error("Failed to query files by filename")]
+    QueryGetFilesByFilename,
+
+    #[error("Failed to query files by hash")]
+    QueryGetFilesByHash,
 }
 
 const MIGRATION_SQL: &str = r#"
@@ -51,7 +66,8 @@ impl Database {
 
         let pool = SqlitePool::connect(&database_url)
             .await
-            .change_context(DatabaseError::Connection)?;
+            .change_context(DatabaseError::Connection)
+            .attach_printable_lazy(|| format!("db_url={database_url}"))?;
 
         // Run migration
         sqlx::query(MIGRATION_SQL)
@@ -95,7 +111,7 @@ impl Database {
         .bind(last_modified_secs)
         .execute(&self.pool)
         .await
-        .change_context(DatabaseError::Query)?;
+        .change_context(DatabaseError::Insert)?;
 
         Ok(())
     }
@@ -106,7 +122,7 @@ impl Database {
             .bind(hash)
             .fetch_one(&self.pool)
             .await
-            .change_context(DatabaseError::Query)?;
+            .change_context(DatabaseError::QueryHashExists)?;
 
         let count: i64 = row.get("count");
         Ok(count > 0)
@@ -118,7 +134,7 @@ impl Database {
             .bind(hash)
             .fetch_all(&self.pool)
             .await
-            .change_context(DatabaseError::Query)?;
+            .change_context(DatabaseError::QueryGetFilesByHash)?;
 
         let paths = rows
             .into_iter()
@@ -140,7 +156,7 @@ impl Database {
             .bind(filename)
             .fetch_all(&self.pool)
             .await
-            .change_context(DatabaseError::Query)?;
+            .change_context(DatabaseError::QueryGetFilesByFilename)?;
 
         let paths = rows
             .into_iter()
@@ -159,7 +175,7 @@ impl Database {
             .bind(file_path.as_str())
             .execute(&self.pool)
             .await
-            .change_context(DatabaseError::Query)?;
+            .change_context(DatabaseError::Delete)?;
 
         Ok(())
     }
@@ -179,7 +195,7 @@ impl Database {
             .bind(file_path.as_str())
             .fetch_optional(&self.pool)
             .await
-            .change_context(DatabaseError::Query)?;
+            .change_context(DatabaseError::QueryGetFileHash)?;
 
         if let Some(row) = row {
             let stored_modified: i64 = row.get("last_modified");

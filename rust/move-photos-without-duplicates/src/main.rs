@@ -3,7 +3,14 @@ mod db;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use db::Database;
-use error_stack::Result;
+use error_stack::{Result, ResultExt};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("Database error")]
+    DB,
+}
 
 #[derive(Parser)]
 #[command(name = "move-photos-without-duplicates")]
@@ -27,11 +34,13 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), AppError> {
     let args = Args::parse();
 
     // Initialize database
-    let _db = Database::new(&args.db_path).await?;
+    let _db = Database::new(&args.db_path)
+        .await
+        .change_context(AppError::DB)?;
 
     println!("Database initialized successfully");
 

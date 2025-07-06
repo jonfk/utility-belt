@@ -81,7 +81,7 @@ A Rust CLI program that moves photo files from a source directory to a target di
 - tokio async runtime
 - walkdir for directory traversal and iterating over files
 - error-stack for high level error reporting and returning errors externally to users
-- snafu to create specific errors from low level errors
+- thiserror to create specific errors from low level errors
 - camino for utf8 paths. We can assume all the paths are utf8 since they are generally from devices that support utf8 such as iPhone, cameras, etc. If we encounter a non-utf8 path, we return and error and exit.
     - If this becomes an issue in the future, we can instead decide to either support byte strings or skip non-utf8 string and print an error when it happens. 
 
