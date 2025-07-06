@@ -1,6 +1,8 @@
 use camino::Utf8PathBuf;
 use error_stack::{Report, Result, ResultExt};
 use sqlx::{Row, SqlitePool};
+use sqlx::sqlite::SqliteConnectOptions;
+use std::str::FromStr;
 use std::time::SystemTime;
 use thiserror::Error;
 
@@ -62,12 +64,22 @@ pub struct Database {
 
 impl Database {
     pub async fn new(db_path: &Utf8PathBuf) -> Result<Self, DatabaseError> {
-        let database_url = format!("sqlite:{}", db_path);
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .change_context(DatabaseError::Connection)
+                .attach_printable_lazy(|| format!("Failed to create database directory: {}", parent))?;
+        }
 
-        let pool = SqlitePool::connect(&database_url)
+        let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_path))
+            .change_context(DatabaseError::Connection)
+            .attach_printable_lazy(|| format!("Failed to parse database URL for: {}", db_path))?
+            .create_if_missing(true);
+
+        let pool = SqlitePool::connect_with(options)
             .await
             .change_context(DatabaseError::Connection)
-            .attach_printable_lazy(|| format!("db_url={database_url}"))?;
+            .attach_printable_lazy(|| format!("db_path={}", db_path))?;
 
         // Run migration
         sqlx::query(MIGRATION_SQL)
