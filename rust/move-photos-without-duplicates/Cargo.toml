@@ -14,3 +14,4 @@ walkdir = "2.5.0"
 # error handling
 error-stack = "0.5.0"
 thiserror = "2.0.12"
+rayon = "1.10.0"
