@@ -128,6 +128,46 @@ impl Database {
         Ok(())
     }
 
+    /// Insert or update multiple file hash entries in a single transaction
+    pub async fn batch_upsert_file_hashes(
+        &self,
+        file_infos: &[crate::FileInfo],
+    ) -> Result<(), DatabaseError> {
+        let mut tx = self.pool.begin().await.change_context(DatabaseError::Insert)?;
+
+        for file_info in file_infos {
+            let filename = file_info.path.file_name().unwrap_or("unknown");
+            let last_modified_secs = file_info
+                .last_modified
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+
+            sqlx::query(
+                r#"
+                INSERT INTO file_hashes (file_path, filename, hash, file_size, last_modified)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(file_path) DO UPDATE SET
+                    filename = excluded.filename,
+                    hash = excluded.hash,
+                    file_size = excluded.file_size,
+                    last_modified = excluded.last_modified
+                "#,
+            )
+            .bind(file_info.path.as_str())
+            .bind(filename)
+            .bind(&file_info.hash)
+            .bind(file_info.size as i64)
+            .bind(last_modified_secs)
+            .execute(&mut *tx)
+            .await
+            .change_context(DatabaseError::Insert)?;
+        }
+
+        tx.commit().await.change_context(DatabaseError::Insert)?;
+        Ok(())
+    }
+
     /// Check if a hash already exists in the database
     pub async fn hash_exists(&self, hash: &str) -> Result<bool, DatabaseError> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM file_hashes WHERE hash = ?")

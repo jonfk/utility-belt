@@ -42,6 +42,10 @@ struct Args {
     #[arg(long, default_value = "photo_hashes.db")]
     db_path: Utf8PathBuf,
 
+    /// Batch size for processing files (to control memory usage)
+    #[arg(long, default_value = "2000")]
+    batch_size: usize,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -70,7 +74,7 @@ enum Commands {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FileInfo {
     path: Utf8PathBuf,
     hash: String,
@@ -128,7 +132,7 @@ fn setup_progress_logging() -> MultiProgress {
     multi
 }
 
-async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database, multi: &MultiProgress) -> Result<(), AppError> {
+async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database, multi: &MultiProgress, batch_size: usize) -> Result<(), AppError> {
     // Phase 1: Directory scanning with spinner
     let scan_pb = multi.add(ProgressBar::new_spinner());
     scan_pb.set_style(
@@ -189,107 +193,93 @@ async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database, multi: 
 
     scan_pb.finish_with_message(format!("✓ Found {} files to process", file_paths.len()));
 
-    // Phase 2: File processing with progress bar
+    // Phase 2: Batched file processing with progress bar
     let process_pb = multi.add(ProgressBar::new(file_paths.len() as u64));
     process_pb.set_style(
         ProgressStyle::with_template("📁 [{elapsed}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
             .unwrap()
             .progress_chars("##-"),
     );
-    process_pb.set_message("Processing files...");
+    process_pb.set_message("Processing files in batches...");
 
-    // Process files in parallel using rayon with shared progress bar
-    let process_pb_clone = Arc::new(process_pb);
-    let results: Vec<Result<FileInfo, AppError>> = file_paths
-        .par_iter()
-        .map(|path| {
-            let result = process_file(path);
-            process_pb_clone.inc(1);
-            if let Ok(file_info) = &result {
-                process_pb_clone.set_message(format!("Processed: {}", file_info.path.file_name().unwrap_or("unknown")));
-            }
-            result
-        })
-        .collect();
+    let process_pb_arc = Arc::new(process_pb);
+    let total_files = file_paths.len();
+    let num_batches = (total_files + batch_size - 1) / batch_size;
+    
+    let mut total_processing_errors = 0;
+    let mut total_db_errors = 0;
+    let mut total_processed = 0;
 
-    // Separate successful results from errors
-    let mut file_infos = Vec::new();
-    let mut processing_errors = 0;
+    println!("Processing {} files in {} batches of {} files each", total_files, num_batches, batch_size);
 
-    for (path, result) in file_paths.iter().zip(results.iter()) {
-        match result {
-            Ok(info) => {
-                file_infos.push(info);
+    // Process files in batches
+    for (batch_num, batch_paths) in file_paths.chunks(batch_size).enumerate() {
+        let batch_start = batch_num * batch_size;
+        process_pb_arc.set_message(format!("Processing batch {}/{} (files {}-{})", 
+            batch_num + 1, num_batches, batch_start + 1, batch_start + batch_paths.len()));
+
+        // Process files in this batch in parallel
+        let batch_results: Vec<Result<FileInfo, AppError>> = batch_paths
+            .par_iter()
+            .map(|path| {
+                let result = process_file(path);
+                process_pb_arc.inc(1);
+                result
+            })
+            .collect();
+
+        // Separate successful results from errors
+        let mut batch_file_infos = Vec::new();
+        let mut batch_processing_errors = 0;
+
+        for (path, result) in batch_paths.iter().zip(batch_results.iter()) {
+            match result {
+                Ok(info) => {
+                    batch_file_infos.push(info.clone());
+                }
+                Err(e) => {
+                    eprintln!("ERROR: Failed to process file: {}", path);
+                    eprintln!("  Details: {:?}", e);
+                    batch_processing_errors += 1;
+                }
             }
-            Err(e) => {
-                eprintln!("ERROR: Failed to process file: {}", path);
-                eprintln!("  Details: {:?}", e);
-                processing_errors += 1;
+        }
+
+        total_processing_errors += batch_processing_errors;
+        total_processed += batch_file_infos.len();
+
+        // Store this batch in database using transaction
+        if !batch_file_infos.is_empty() {
+            match db.batch_upsert_file_hashes(&batch_file_infos).await {
+                Ok(()) => {
+                    process_pb_arc.set_message(format!("✓ Batch {}/{} stored ({} files)", 
+                        batch_num + 1, num_batches, batch_file_infos.len()));
+                }
+                Err(e) => {
+                    eprintln!("ERROR: Failed to store batch {} in database", batch_num + 1);
+                    eprintln!("  Details: {:?}", e);
+                    total_db_errors += batch_file_infos.len();
+                }
             }
+        }
+
+        // Brief pause between batches to prevent overwhelming the system
+        if batch_num < num_batches - 1 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     }
 
-    if processing_errors > 0 {
-        process_pb_clone.finish_with_message(format!("✓ Processed {} files ({} errors)", file_infos.len(), processing_errors));
-        eprintln!("WARNING: Failed to process {} files", processing_errors);
-    } else {
-        process_pb_clone.finish_with_message(format!("✓ Successfully processed {} files", file_infos.len()));
-    }
-
-    // Phase 3: Database storage with progress bar
-    let db_pb = multi.add(ProgressBar::new(file_infos.len() as u64));
-    db_pb.set_style(
-        ProgressStyle::with_template("💾 [{elapsed}] {bar:30.green/yellow} {pos:>7}/{len:7} {msg}")
-            .unwrap()
-            .progress_chars("##-"),
-    );
-    db_pb.set_message("Storing hashes...");
-
-    // Store results in database sequentially (SQLite doesn't handle concurrent writes well)
-    let mut db_errors = 0;
-    for file_info in file_infos {
-        match db
-            .upsert_file_hash(
-                &file_info.path,
-                &file_info.hash,
-                file_info.size,
-                file_info.last_modified,
-            )
-            .await
-        {
-            Ok(()) => {
-                db_pb.inc(1);
-                db_pb.set_message(format!("Stored: {}", file_info.path.file_name().unwrap_or("unknown")));
-            }
-            Err(e) => {
-                db_pb.inc(1);
-                eprintln!("ERROR: Failed to store hash in database (SQL INSERT/UPDATE operation)");
-                eprintln!("  File: {}", file_info.path);
-                eprintln!("  Database error: {:?}", e);
-                db_errors += 1;
-            }
-        }
-    }
-
-    if db_errors > 0 {
-        db_pb.finish_with_message(format!("✓ Stored {} hashes ({} errors)", db_pb.position(), db_errors));
-        eprintln!(
-            "WARNING: Failed to store {} file hashes in database",
-            db_errors
-        );
-    } else {
-        db_pb.finish_with_message(format!("✓ Successfully stored {} hashes", db_pb.position()));
-    }
+    process_pb_arc.finish_with_message(format!("✓ Processed {} files in {} batches", total_processed, num_batches));
 
     // Report summary
-    let total_errors = traversal_errors + processing_errors + db_errors;
+    let total_errors = traversal_errors + total_processing_errors + total_db_errors;
     if total_errors > 0 {
         eprintln!("SUMMARY: Completed with {} total errors", total_errors);
         eprintln!("  - Directory traversal errors: {}", traversal_errors);
-        eprintln!("  - File processing errors: {}", processing_errors);
-        eprintln!("  - Database storage errors: {}", db_errors);
+        eprintln!("  - File processing errors: {}", total_processing_errors);
+        eprintln!("  - Database storage errors: {}", total_db_errors);
     } else {
-        println!("SUMMARY: All files processed successfully!");
+        println!("SUMMARY: All {} files processed successfully in {} batches!", total_processed, num_batches);
     }
 
     Ok(())
@@ -579,7 +569,7 @@ async fn main() -> Result<(), AppError> {
     match args.command {
         Commands::Hash { target_dir } => {
             println!("Running hash command for target directory: {}", target_dir);
-            scan_and_hash_directory(&target_dir, &db, &multi).await?;
+            scan_and_hash_directory(&target_dir, &db, &multi, args.batch_size).await?;
             println!("Directory scanning and hashing completed");
         }
         Commands::Copy {
