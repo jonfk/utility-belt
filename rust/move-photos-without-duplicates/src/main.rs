@@ -4,9 +4,11 @@ use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use db::Database;
 use error_stack::{Result, ResultExt};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::sync::Arc;
 use std::time::SystemTime;
 use thiserror::Error;
 use walkdir::WalkDir;
@@ -119,19 +121,37 @@ fn process_file(entry_path: &Utf8PathBuf) -> Result<FileInfo, AppError> {
     })
 }
 
-async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database) -> Result<(), AppError> {
-    println!("Scanning directory: {}", directory);
+fn setup_progress_logging() -> MultiProgress {
+    let multi = MultiProgress::new();
+    
+    // For now, just return MultiProgress - we'll keep logging simple
+    multi
+}
+
+async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database, multi: &MultiProgress) -> Result<(), AppError> {
+    // Phase 1: Directory scanning with spinner
+    let scan_pb = multi.add(ProgressBar::new_spinner());
+    scan_pb.set_style(
+        ProgressStyle::with_template("🔍 {spinner:.green} {wide_msg}")
+            .unwrap()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
+    );
+    scan_pb.set_message(format!("Scanning directory: {}", directory));
 
     // Collect all entries and handle walkdir errors
     let mut file_paths = Vec::new();
     let mut traversal_errors = 0;
 
     for entry in WalkDir::new(directory) {
+        scan_pb.tick();
         match entry {
             Ok(dir_entry) => {
                 if dir_entry.file_type().is_file() {
                     match Utf8PathBuf::from_path_buf(dir_entry.path().to_path_buf()) {
-                        Ok(utf8_path) => file_paths.push(utf8_path),
+                        Ok(utf8_path) => {
+                            file_paths.push(utf8_path);
+                            scan_pb.set_message(format!("Scanning... found {} files", file_paths.len()));
+                        },
                         Err(path_buf) => {
                             eprintln!(
                                 "ERROR: Non-UTF8 path encountered during path conversion: {:?}",
@@ -167,12 +187,29 @@ async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database) -> Resu
         );
     }
 
-    println!("Found {} files to process", file_paths.len());
+    scan_pb.finish_with_message(format!("✓ Found {} files to process", file_paths.len()));
 
-    // Process files in parallel using rayon
+    // Phase 2: File processing with progress bar
+    let process_pb = multi.add(ProgressBar::new(file_paths.len() as u64));
+    process_pb.set_style(
+        ProgressStyle::with_template("📁 [{elapsed}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+    process_pb.set_message("Processing files...");
+
+    // Process files in parallel using rayon with shared progress bar
+    let process_pb_clone = Arc::new(process_pb);
     let results: Vec<Result<FileInfo, AppError>> = file_paths
         .par_iter()
-        .map(|path| process_file(path))
+        .map(|path| {
+            let result = process_file(path);
+            process_pb_clone.inc(1);
+            if let Ok(file_info) = &result {
+                process_pb_clone.set_message(format!("Processed: {}", file_info.path.file_name().unwrap_or("unknown")));
+            }
+            result
+        })
         .collect();
 
     // Separate successful results from errors
@@ -182,7 +219,6 @@ async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database) -> Resu
     for (path, result) in file_paths.iter().zip(results.iter()) {
         match result {
             Ok(info) => {
-                println!("Processed: {}", path);
                 file_infos.push(info);
             }
             Err(e) => {
@@ -194,10 +230,20 @@ async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database) -> Resu
     }
 
     if processing_errors > 0 {
+        process_pb_clone.finish_with_message(format!("✓ Processed {} files ({} errors)", file_infos.len(), processing_errors));
         eprintln!("WARNING: Failed to process {} files", processing_errors);
+    } else {
+        process_pb_clone.finish_with_message(format!("✓ Successfully processed {} files", file_infos.len()));
     }
 
-    println!("Successfully processed {} files", file_infos.len());
+    // Phase 3: Database storage with progress bar
+    let db_pb = multi.add(ProgressBar::new(file_infos.len() as u64));
+    db_pb.set_style(
+        ProgressStyle::with_template("💾 [{elapsed}] {bar:30.green/yellow} {pos:>7}/{len:7} {msg}")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+    db_pb.set_message("Storing hashes...");
 
     // Store results in database sequentially (SQLite doesn't handle concurrent writes well)
     let mut db_errors = 0;
@@ -211,8 +257,12 @@ async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database) -> Resu
             )
             .await
         {
-            Ok(()) => {}
+            Ok(()) => {
+                db_pb.inc(1);
+                db_pb.set_message(format!("Stored: {}", file_info.path.file_name().unwrap_or("unknown")));
+            }
             Err(e) => {
+                db_pb.inc(1);
                 eprintln!("ERROR: Failed to store hash in database (SQL INSERT/UPDATE operation)");
                 eprintln!("  File: {}", file_info.path);
                 eprintln!("  Database error: {:?}", e);
@@ -222,10 +272,13 @@ async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database) -> Resu
     }
 
     if db_errors > 0 {
+        db_pb.finish_with_message(format!("✓ Stored {} hashes ({} errors)", db_pb.position(), db_errors));
         eprintln!(
             "WARNING: Failed to store {} file hashes in database",
             db_errors
         );
+    } else {
+        db_pb.finish_with_message(format!("✓ Successfully stored {} hashes", db_pb.position()));
     }
 
     // Report summary
@@ -513,6 +566,9 @@ async fn process_single_file(
 async fn main() -> Result<(), AppError> {
     let args = Args::parse();
 
+    // Setup progress bars and logging
+    let multi = setup_progress_logging();
+
     // Initialize database
     let db = Database::new(&args.db_path)
         .await
@@ -523,7 +579,7 @@ async fn main() -> Result<(), AppError> {
     match args.command {
         Commands::Hash { target_dir } => {
             println!("Running hash command for target directory: {}", target_dir);
-            scan_and_hash_directory(&target_dir, &db).await?;
+            scan_and_hash_directory(&target_dir, &db, &multi).await?;
             println!("Directory scanning and hashing completed");
         }
         Commands::Copy {
