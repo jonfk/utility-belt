@@ -385,6 +385,7 @@ async fn copy_files_without_duplicates(
     dir_a: &Utf8PathBuf,
     dir_b: &Utf8PathBuf,
     db: &Database,
+    multi: &MultiProgress,
     dry_run: bool,
 ) -> Result<(), AppError> {
     println!("Starting copy operation from {} to {}", dir_a, dir_b);
@@ -392,16 +393,29 @@ async fn copy_files_without_duplicates(
         println!("DRY RUN MODE: No files will actually be copied");
     }
 
+    // Phase 1: Directory scanning with spinner
+    let scan_pb = multi.add(ProgressBar::new_spinner());
+    scan_pb.set_style(
+        ProgressStyle::with_template("🔍 {spinner:.green} {wide_msg}")
+            .unwrap()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
+    );
+    scan_pb.set_message(format!("Scanning source directory: {}", dir_a));
+
     // Collect all files in directory A
     let mut file_paths = Vec::new();
     let mut traversal_errors = 0;
 
     for entry in WalkDir::new(dir_a) {
+        scan_pb.tick();
         match entry {
             Ok(dir_entry) => {
                 if dir_entry.file_type().is_file() {
                     match Utf8PathBuf::from_path_buf(dir_entry.path().to_path_buf()) {
-                        Ok(utf8_path) => file_paths.push(utf8_path),
+                        Ok(utf8_path) => {
+                            file_paths.push(utf8_path);
+                            scan_pb.set_message(format!("Scanning... found {} files", file_paths.len()));
+                        }
                         Err(path_buf) => {
                             eprintln!("ERROR: Non-UTF8 path encountered: {:?}", path_buf);
                             traversal_errors += 1;
@@ -427,9 +441,17 @@ async fn copy_files_without_duplicates(
         );
     }
 
-    println!("Found {} files in source directory", file_paths.len());
+    scan_pb.finish_with_message(format!("✓ Found {} files to copy", file_paths.len()));
 
-    // Process each file
+    // Phase 2: File processing with progress bar
+    let process_pb = multi.add(ProgressBar::new(file_paths.len() as u64));
+    process_pb.set_style(
+        ProgressStyle::with_template("📋 [{elapsed}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+    process_pb.set_message("Processing files...");
+
     let mut copied_count = 0;
     let mut skipped_count = 0;
     let mut error_count = 0;
@@ -438,19 +460,29 @@ async fn copy_files_without_duplicates(
         match process_single_file(&file_path, dir_a, dir_b, db, dry_run).await {
             Ok(CopyResult::Copied) => {
                 copied_count += 1;
+                process_pb.set_message(format!("Copied: {} files, {} skipped, {} errors", 
+                    copied_count, skipped_count, error_count));
                 println!("COPIED: {}", file_path);
             }
             Ok(CopyResult::Skipped(reason)) => {
                 skipped_count += 1;
+                process_pb.set_message(format!("Copied: {} files, {} skipped, {} errors", 
+                    copied_count, skipped_count, error_count));
                 println!("SKIPPED: {} ({})", file_path, reason);
             }
             Err(e) => {
                 error_count += 1;
+                process_pb.set_message(format!("Copied: {} files, {} skipped, {} errors", 
+                    copied_count, skipped_count, error_count));
                 eprintln!("ERROR: Failed to process {}", file_path);
                 eprintln!("  Details: {:?}", e);
             }
         }
+        process_pb.inc(1);
     }
+
+    process_pb.finish_with_message(format!("✓ Copy complete: {} copied, {} skipped, {} errors", 
+        copied_count, skipped_count, error_count));
 
     // Print summary
     println!("\nCOPY OPERATION SUMMARY:");
@@ -581,7 +613,7 @@ async fn main() -> Result<(), AppError> {
         } => {
             println!("Running copy command");
             validate_copy_command(&source_dir, &target_dir, &dir_a, &dir_b)?;
-            copy_files_without_duplicates(&dir_a, &dir_b, &db, dry_run).await?;
+            copy_files_without_duplicates(&dir_a, &dir_b, &db, &multi, dry_run).await?;
             println!("Copy operation completed");
         }
     }
