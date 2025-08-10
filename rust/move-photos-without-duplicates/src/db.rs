@@ -1,5 +1,6 @@
+use crate::types::FileInfo;
 use camino::Utf8PathBuf;
-use error_stack::{Report, Result, ResultExt};
+use error_stack::{Result, ResultExt};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
@@ -179,7 +180,7 @@ impl Database {
     /// Insert or update multiple file hash entries in a single transaction
     pub async fn batch_upsert_file_hashes(
         &self,
-        file_infos: &[crate::FileInfo],
+        file_infos: &[FileInfo],
     ) -> Result<(), DatabaseError> {
         let mut tx = self
             .pool
