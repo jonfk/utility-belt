@@ -31,6 +31,21 @@ pub enum DatabaseError {
 
     #[error("Failed to query files by hash")]
     QueryGetFilesByHash,
+
+    #[error("Failed to track copied file")]
+    TrackCopiedFile,
+
+    #[error("Failed to track duplicate file")]
+    TrackDuplicateFile,
+
+    #[error("Failed to query copied files")]
+    QueryCopiedFiles,
+
+    #[error("Failed to query duplicate files")]
+    QueryDuplicateFiles,
+
+    #[error("Failed to remove tracked file")]
+    RemoveTrackedFile,
 }
 
 const MIGRATION_SQL: &str = r#"
@@ -56,6 +71,34 @@ CREATE INDEX IF NOT EXISTS idx_filepath ON file_hashes(file_path);
 
 -- Index for efficient cleanup of stale entries
 CREATE INDEX IF NOT EXISTS idx_last_modified ON file_hashes(last_modified);
+
+-- Create copied_files table to track successfully copied files
+CREATE TABLE IF NOT EXISTS copied_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_path TEXT NOT NULL,
+    target_path TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+-- Create duplicate_files table to track files skipped as duplicates
+CREATE TABLE IF NOT EXISTS duplicate_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    duplicate_path TEXT NOT NULL,
+    original_path TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+-- Indexes for efficient lookups
+CREATE INDEX IF NOT EXISTS idx_copied_source ON copied_files(source_path);
+CREATE INDEX IF NOT EXISTS idx_copied_target ON copied_files(target_path);
+CREATE INDEX IF NOT EXISTS idx_copied_hash ON copied_files(hash);
+CREATE INDEX IF NOT EXISTS idx_duplicate_path ON duplicate_files(duplicate_path);
+CREATE INDEX IF NOT EXISTS idx_duplicate_original ON duplicate_files(original_path);
+CREATE INDEX IF NOT EXISTS idx_duplicate_hash ON duplicate_files(hash);
 "#;
 
 pub struct Database {
@@ -274,4 +317,164 @@ impl Database {
             Ok(None)
         }
     }
+
+    /// Track a successfully copied file
+    pub async fn track_copied_file(
+        &self,
+        source_path: &Utf8PathBuf,
+        target_path: &Utf8PathBuf,
+        hash: &str,
+        file_size: u64,
+    ) -> Result<(), DatabaseError> {
+        sqlx::query(
+            r#"
+            INSERT INTO copied_files (source_path, target_path, hash, file_size)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(source_path.as_str())
+        .bind(target_path.as_str())
+        .bind(hash)
+        .bind(file_size as i64)
+        .execute(&self.pool)
+        .await
+        .change_context(DatabaseError::TrackCopiedFile)?;
+
+        Ok(())
+    }
+
+    /// Track a file that was skipped as duplicate
+    pub async fn track_duplicate_file(
+        &self,
+        duplicate_path: &Utf8PathBuf,
+        original_path: &Utf8PathBuf,
+        hash: &str,
+        file_size: u64,
+    ) -> Result<(), DatabaseError> {
+        sqlx::query(
+            r#"
+            INSERT INTO duplicate_files (duplicate_path, original_path, hash, file_size)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(duplicate_path.as_str())
+        .bind(original_path.as_str())
+        .bind(hash)
+        .bind(file_size as i64)
+        .execute(&self.pool)
+        .await
+        .change_context(DatabaseError::TrackDuplicateFile)?;
+
+        Ok(())
+    }
+
+    /// Get all tracked copied files
+    pub async fn get_copied_files(&self) -> Result<Vec<CopiedFileRecord>, DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT source_path, target_path, hash, file_size, created_at FROM copied_files ORDER BY created_at"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .change_context(DatabaseError::QueryCopiedFiles)?;
+
+        let records = rows
+            .into_iter()
+            .map(|row| {
+                let source_path: String = row.get("source_path");
+                let target_path: String = row.get("target_path");
+                let hash: String = row.get("hash");
+                let file_size: i64 = row.get("file_size");
+                let created_at: i64 = row.get("created_at");
+
+                CopiedFileRecord {
+                    source_path: Utf8PathBuf::from(source_path),
+                    target_path: Utf8PathBuf::from(target_path),
+                    hash,
+                    file_size: file_size as u64,
+                    created_at,
+                }
+            })
+            .collect();
+
+        Ok(records)
+    }
+
+    /// Get all tracked duplicate files
+    pub async fn get_duplicate_files(&self) -> Result<Vec<DuplicateFileRecord>, DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT duplicate_path, original_path, hash, file_size, created_at FROM duplicate_files ORDER BY created_at"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .change_context(DatabaseError::QueryDuplicateFiles)?;
+
+        let records = rows
+            .into_iter()
+            .map(|row| {
+                let duplicate_path: String = row.get("duplicate_path");
+                let original_path: String = row.get("original_path");
+                let hash: String = row.get("hash");
+                let file_size: i64 = row.get("file_size");
+                let created_at: i64 = row.get("created_at");
+
+                DuplicateFileRecord {
+                    duplicate_path: Utf8PathBuf::from(duplicate_path),
+                    original_path: Utf8PathBuf::from(original_path),
+                    hash,
+                    file_size: file_size as u64,
+                    created_at,
+                }
+            })
+            .collect();
+
+        Ok(records)
+    }
+
+    /// Remove a tracked copied file record
+    pub async fn remove_copied_file_record(
+        &self,
+        source_path: &Utf8PathBuf,
+        target_path: &Utf8PathBuf,
+    ) -> Result<(), DatabaseError> {
+        sqlx::query("DELETE FROM copied_files WHERE source_path = ? AND target_path = ?")
+            .bind(source_path.as_str())
+            .bind(target_path.as_str())
+            .execute(&self.pool)
+            .await
+            .change_context(DatabaseError::RemoveTrackedFile)?;
+
+        Ok(())
+    }
+
+    /// Remove a tracked duplicate file record
+    pub async fn remove_duplicate_file_record(
+        &self,
+        duplicate_path: &Utf8PathBuf,
+    ) -> Result<(), DatabaseError> {
+        sqlx::query("DELETE FROM duplicate_files WHERE duplicate_path = ?")
+            .bind(duplicate_path.as_str())
+            .execute(&self.pool)
+            .await
+            .change_context(DatabaseError::RemoveTrackedFile)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CopiedFileRecord {
+    pub source_path: Utf8PathBuf,
+    pub target_path: Utf8PathBuf,
+    pub hash: String,
+    pub file_size: u64,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DuplicateFileRecord {
+    pub duplicate_path: Utf8PathBuf,
+    pub original_path: Utf8PathBuf,
+    pub hash: String,
+    pub file_size: u64,
+    pub created_at: i64,
 }

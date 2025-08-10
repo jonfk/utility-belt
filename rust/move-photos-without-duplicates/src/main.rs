@@ -2,7 +2,7 @@ mod db;
 
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
-use db::Database;
+use db::{Database, CopiedFileRecord, DuplicateFileRecord};
 use error_stack::{Result, ResultExt};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -32,6 +32,9 @@ pub enum AppError {
 
     #[error("Copy operation error")]
     Copy,
+
+    #[error("Cleanup operation error")]
+    Cleanup,
 }
 
 #[derive(Parser)]
@@ -69,6 +72,12 @@ enum Commands {
         /// Directory B (within target)
         dir_b: Utf8PathBuf,
         /// Perform a dry run without actually copying files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean up tracked copied and duplicate files
+    Cleanup {
+        /// Perform a dry run without actually deleting files
         #[arg(long)]
         dry_run: bool,
     },
@@ -541,16 +550,31 @@ async fn process_single_file(
     let file_hash = calculate_file_hash(file_path)?;
 
     // Check if this hash already exists in the database (duplicate)
-    let hash_exists = db
-        .hash_exists(&file_hash)
+    let existing_files = db
+        .get_files_with_hash(&file_hash)
         .await
         .change_context(AppError::DB)
         .attach_printable_lazy(|| format!("file={file_path}"))?;
 
-    if hash_exists {
-        return Ok(CopyResult::Skipped(
-            "duplicate content (hash exists)".to_string(),
-        ));
+    if !existing_files.is_empty() {
+        // Track this as a duplicate file
+        let original_path = &existing_files[0]; // Use first match as original
+        let file_size = metadata.len();
+        
+        if let Err(e) = db
+            .track_duplicate_file(file_path, original_path, &file_hash, file_size)
+            .await
+        {
+            eprintln!(
+                "WARNING: Failed to track duplicate file {}: {:?}",
+                file_path, e
+            );
+        }
+        
+        return Ok(CopyResult::Skipped(format!(
+            "duplicate content (matches {})",
+            original_path
+        )));
     }
 
     if dry_run {
@@ -581,7 +605,243 @@ async fn process_single_file(
         );
     }
 
+    // Track this as a copied file
+    if let Err(e) = db
+        .track_copied_file(file_path, &target_path, &file_hash, file_size)
+        .await
+    {
+        eprintln!(
+            "WARNING: Failed to track copied file {} -> {}: {:?}",
+            file_path, target_path, e
+        );
+    }
+
     Ok(CopyResult::Copied)
+}
+
+async fn cleanup_tracked_files(
+    db: &Database,
+    multi: &MultiProgress,
+    dry_run: bool,
+) -> Result<(), AppError> {
+    println!("Starting cleanup of tracked files");
+    if dry_run {
+        println!("DRY RUN MODE: No files will actually be deleted");
+    }
+
+    // Phase 1: Get all tracked files
+    let scan_pb = multi.add(ProgressBar::new_spinner());
+    scan_pb.set_style(
+        ProgressStyle::with_template("🔍 {spinner:.green} {wide_msg}")
+            .unwrap()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
+    );
+    scan_pb.set_message("Loading tracked files from database...");
+
+    let copied_files = db
+        .get_copied_files()
+        .await
+        .change_context(AppError::Cleanup)
+        .attach_printable("Failed to retrieve copied files")?;
+
+    let duplicate_files = db
+        .get_duplicate_files()
+        .await
+        .change_context(AppError::Cleanup)
+        .attach_printable("Failed to retrieve duplicate files")?;
+
+    scan_pb.finish_with_message(format!(
+        "✓ Found {} copied files and {} duplicate files to process",
+        copied_files.len(),
+        duplicate_files.len()
+    ));
+
+    let total_files = copied_files.len() + duplicate_files.len();
+    if total_files == 0 {
+        println!("No tracked files found for cleanup");
+        return Ok(());
+    }
+
+    // Phase 2: Process copied files
+    let process_pb = multi.add(ProgressBar::new(total_files as u64));
+    process_pb.set_style(
+        ProgressStyle::with_template("🗑️  [{elapsed}] {bar:40.red/yellow} {pos:>7}/{len:7} {msg}")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+    process_pb.set_message("Processing copied files...");
+
+    let mut deleted_count = 0;
+    let mut skipped_count = 0;
+    let mut error_count = 0;
+
+    println!("\n=== PROCESSING COPIED FILES ===");
+    for copied_file in copied_files {
+        match cleanup_copied_file(&copied_file, db, dry_run).await {
+            Ok(CleanupResult::Deleted) => {
+                deleted_count += 1;
+                println!("DELETED: {} (target: {})", copied_file.source_path, copied_file.target_path);
+            }
+            Ok(CleanupResult::Skipped(reason)) => {
+                skipped_count += 1;
+                println!("SKIPPED: {} ({})", copied_file.source_path, reason);
+            }
+            Err(e) => {
+                error_count += 1;
+                eprintln!("ERROR: Failed to cleanup {}: {:?}", copied_file.source_path, e);
+            }
+        }
+        process_pb.inc(1);
+        process_pb.set_message(format!("Cleaned: {} deleted, {} skipped, {} errors", 
+            deleted_count, skipped_count, error_count));
+    }
+
+    println!("\n=== PROCESSING DUPLICATE FILES ===");
+    for duplicate_file in duplicate_files {
+        match cleanup_duplicate_file(&duplicate_file, db, dry_run).await {
+            Ok(CleanupResult::Deleted) => {
+                deleted_count += 1;
+                println!("DELETED: {} (duplicate of: {})", duplicate_file.duplicate_path, duplicate_file.original_path);
+            }
+            Ok(CleanupResult::Skipped(reason)) => {
+                skipped_count += 1;
+                println!("SKIPPED: {} ({})", duplicate_file.duplicate_path, reason);
+            }
+            Err(e) => {
+                error_count += 1;
+                eprintln!("ERROR: Failed to cleanup {}: {:?}", duplicate_file.duplicate_path, e);
+            }
+        }
+        process_pb.inc(1);
+        process_pb.set_message(format!("Cleaned: {} deleted, {} skipped, {} errors", 
+            deleted_count, skipped_count, error_count));
+    }
+
+    process_pb.finish_with_message(format!("✓ Cleanup complete: {} deleted, {} skipped, {} errors", 
+        deleted_count, skipped_count, error_count));
+
+    // Print summary
+    println!("\nCLEANUP OPERATION SUMMARY:");
+    println!("  Files deleted: {}", deleted_count);
+    println!("  Files skipped: {}", skipped_count);
+    println!("  Errors: {}", error_count);
+
+    if dry_run {
+        println!("  (This was a dry run - no files were actually deleted)");
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+enum CleanupResult {
+    Deleted,
+    Skipped(String),
+}
+
+async fn cleanup_copied_file(
+    copied_file: &CopiedFileRecord,
+    db: &Database,
+    dry_run: bool,
+) -> Result<CleanupResult, AppError> {
+    // Check if target file still exists to verify the copy was successful
+    if !copied_file.target_path.exists() {
+        return Ok(CleanupResult::Skipped(
+            "target file no longer exists - copy may have failed".to_string(),
+        ));
+    }
+
+    // Check if source file still exists
+    if !copied_file.source_path.exists() {
+        // Remove tracking record since source is already gone
+        if !dry_run {
+            if let Err(e) = db
+                .remove_copied_file_record(&copied_file.source_path, &copied_file.target_path)
+                .await
+            {
+                eprintln!(
+                    "WARNING: Failed to remove tracking record for {}: {:?}",
+                    copied_file.source_path, e
+                );
+            }
+        }
+        return Ok(CleanupResult::Skipped(
+            "source file already deleted".to_string(),
+        ));
+    }
+
+    if dry_run {
+        return Ok(CleanupResult::Deleted);
+    }
+
+    // Delete the source file
+    fs::remove_file(&copied_file.source_path)
+        .change_context(AppError::Cleanup)
+        .attach_printable_lazy(|| {
+            format!("Failed to delete source file: {}", copied_file.source_path)
+        })?;
+
+    // Remove tracking record
+    if let Err(e) = db
+        .remove_copied_file_record(&copied_file.source_path, &copied_file.target_path)
+        .await
+    {
+        eprintln!(
+            "WARNING: Failed to remove tracking record for {}: {:?}",
+            copied_file.source_path, e
+        );
+    }
+
+    Ok(CleanupResult::Deleted)
+}
+
+async fn cleanup_duplicate_file(
+    duplicate_file: &DuplicateFileRecord,
+    db: &Database,
+    dry_run: bool,
+) -> Result<CleanupResult, AppError> {
+    // Check if duplicate file still exists
+    if !duplicate_file.duplicate_path.exists() {
+        // Remove tracking record since duplicate is already gone
+        if !dry_run {
+            if let Err(e) = db
+                .remove_duplicate_file_record(&duplicate_file.duplicate_path)
+                .await
+            {
+                eprintln!(
+                    "WARNING: Failed to remove tracking record for {}: {:?}",
+                    duplicate_file.duplicate_path, e
+                );
+            }
+        }
+        return Ok(CleanupResult::Skipped(
+            "duplicate file already deleted".to_string(),
+        ));
+    }
+
+    if dry_run {
+        return Ok(CleanupResult::Deleted);
+    }
+
+    // Delete the duplicate file
+    fs::remove_file(&duplicate_file.duplicate_path)
+        .change_context(AppError::Cleanup)
+        .attach_printable_lazy(|| {
+            format!("Failed to delete duplicate file: {}", duplicate_file.duplicate_path)
+        })?;
+
+    // Remove tracking record
+    if let Err(e) = db
+        .remove_duplicate_file_record(&duplicate_file.duplicate_path)
+        .await
+    {
+        eprintln!(
+            "WARNING: Failed to remove tracking record for {}: {:?}",
+            duplicate_file.duplicate_path, e
+        );
+    }
+
+    Ok(CleanupResult::Deleted)
 }
 
 #[tokio::main]
@@ -615,6 +875,11 @@ async fn main() -> Result<(), AppError> {
             validate_copy_command(&source_dir, &target_dir, &dir_a, &dir_b)?;
             copy_files_without_duplicates(&dir_a, &dir_b, &db, &multi, dry_run).await?;
             println!("Copy operation completed");
+        }
+        Commands::Cleanup { dry_run } => {
+            println!("Running cleanup command");
+            cleanup_tracked_files(&db, &multi, dry_run).await?;
+            println!("Cleanup operation completed");
         }
     }
 
