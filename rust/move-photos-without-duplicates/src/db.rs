@@ -137,7 +137,7 @@ impl Database {
     }
 
     /// Insert or update a file hash entry
-    pub async fn upsert_file_hash(
+    pub(crate) async fn upsert_file_hash(
         &self,
         file_path: &Utf8PathBuf,
         hash: &str,
@@ -319,8 +319,73 @@ impl Database {
         }
     }
 
+    /// Record a successfully copied file - atomically updates file hash and tracks copy
+    pub async fn record_copied_file(
+        &self,
+        source_path: &Utf8PathBuf,
+        target_path: &Utf8PathBuf,
+        hash: &str,
+        file_size: u64,
+        last_modified: SystemTime,
+    ) -> Result<(), DatabaseError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .change_context(DatabaseError::TrackCopiedFile)?;
+
+        // First, upsert the file hash for the target file
+        let filename = target_path.file_name().expect(&format!(
+            "Unexpectedly could not get filename. file_path = {}",
+            target_path
+        ));
+
+        let last_modified_secs = last_modified
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Could not get Unix seconds timestamp from SystemTime")
+            .as_secs() as i64;
+
+        sqlx::query(
+            r#"
+            INSERT INTO file_hashes (file_path, filename, hash, file_size, last_modified)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(file_path) DO UPDATE SET
+                filename = excluded.filename,
+                hash = excluded.hash,
+                file_size = excluded.file_size,
+                last_modified = excluded.last_modified
+            "#,
+        )
+        .bind(target_path.as_str())
+        .bind(filename)
+        .bind(hash)
+        .bind(file_size as i64)
+        .bind(last_modified_secs)
+        .execute(&mut *tx)
+        .await
+        .change_context(DatabaseError::TrackCopiedFile)?;
+
+        // Then, track the copy operation
+        sqlx::query(
+            r#"
+            INSERT INTO copied_files (source_path, target_path, hash, file_size)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(source_path.as_str())
+        .bind(target_path.as_str())
+        .bind(hash)
+        .bind(file_size as i64)
+        .execute(&mut *tx)
+        .await
+        .change_context(DatabaseError::TrackCopiedFile)?;
+
+        tx.commit().await.change_context(DatabaseError::TrackCopiedFile)?;
+        Ok(())
+    }
+
     /// Track a successfully copied file
-    pub async fn track_copied_file(
+    pub(crate) async fn track_copied_file(
         &self,
         source_path: &Utf8PathBuf,
         target_path: &Utf8PathBuf,
