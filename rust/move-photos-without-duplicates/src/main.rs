@@ -97,8 +97,9 @@ async fn main() -> Result<(), AppError> {
         }
         Commands::Cleanup { dry_run } => {
             println!("Running cleanup command");
+            let scanner = FileScanner::new(args.batch_size);
             let cleaner = FileCleaner::new();
-            cleaner.cleanup_tracked_files(&db, &multi, dry_run).await?;
+            cleaner.cleanup_tracked_files(&db, &scanner, &multi, dry_run).await?;
             println!("Cleanup operation completed");
         }
         Commands::Status { detailed } => {
