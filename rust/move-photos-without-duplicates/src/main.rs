@@ -60,17 +60,13 @@ enum Commands {
         /// Target directory path to hash
         target_dir: Utf8PathBuf,
     },
-    /// Copy files from directory A to directory B without duplicates
+    /// Copy files from source to target directory without duplicates
     #[command(alias = "cp")]
     Copy {
         /// Source directory path
-        source_dir: Utf8PathBuf,
+        source: Utf8PathBuf,
         /// Target directory path  
-        target_dir: Utf8PathBuf,
-        /// Directory A (within source)
-        dir_a: Utf8PathBuf,
-        /// Directory B (within target)
-        dir_b: Utf8PathBuf,
+        target: Utf8PathBuf,
         /// Perform a dry run without actually copying files
         #[arg(long)]
         dry_run: bool,
@@ -295,97 +291,36 @@ async fn scan_and_hash_directory(directory: &Utf8PathBuf, db: &Database, multi: 
 }
 
 fn validate_copy_command(
-    source_dir: &Utf8PathBuf,
-    target_dir: &Utf8PathBuf,
-    dir_a: &Utf8PathBuf,
-    dir_b: &Utf8PathBuf,
+    source: &Utf8PathBuf,
+    target: &Utf8PathBuf,
 ) -> Result<(), AppError> {
-    // Check that all paths are directories
-    if !source_dir.is_dir() {
+    // Check that both paths are directories
+    if !source.is_dir() {
         return Err(
             error_stack::Report::new(AppError::Validation).attach_printable(format!(
                 "Source directory does not exist or is not a directory: {}",
-                source_dir
+                source
             )),
         );
     }
 
-    if !target_dir.is_dir() {
+    if !target.is_dir() {
         return Err(
             error_stack::Report::new(AppError::Validation).attach_printable(format!(
                 "Target directory does not exist or is not a directory: {}",
-                target_dir
-            )),
-        );
-    }
-
-    if !dir_a.is_dir() {
-        return Err(
-            error_stack::Report::new(AppError::Validation).attach_printable(format!(
-                "Directory A does not exist or is not a directory: {}",
-                dir_a
-            )),
-        );
-    }
-
-    if !dir_b.is_dir() {
-        return Err(
-            error_stack::Report::new(AppError::Validation).attach_printable(format!(
-                "Directory B does not exist or is not a directory: {}",
-                dir_b
-            )),
-        );
-    }
-
-    // Check that dir_a is within source_dir
-    let canonical_source = source_dir
-        .canonicalize_utf8()
-        .change_context(AppError::Validation)
-        .attach_printable_lazy(|| {
-            format!("Failed to canonicalize source directory: {}", source_dir)
-        })?;
-
-    let canonical_dir_a = dir_a
-        .canonicalize_utf8()
-        .change_context(AppError::Validation)
-        .attach_printable_lazy(|| format!("Failed to canonicalize directory A: {}", dir_a))?;
-
-    if !canonical_dir_a.starts_with(&canonical_source) {
-        return Err(
-            error_stack::Report::new(AppError::Validation).attach_printable(format!(
-                "Directory A ({}) must be within source directory ({})",
-                dir_a, source_dir
-            )),
-        );
-    }
-
-    // Check that dir_b is within target_dir
-    let canonical_target = target_dir
-        .canonicalize_utf8()
-        .change_context(AppError::Validation)
-        .attach_printable_lazy(|| {
-            format!("Failed to canonicalize target directory: {}", target_dir)
-        })?;
-
-    let canonical_dir_b = dir_b
-        .canonicalize_utf8()
-        .change_context(AppError::Validation)
-        .attach_printable_lazy(|| format!("Failed to canonicalize directory B: {}", dir_b))?;
-
-    if !canonical_dir_b.starts_with(&canonical_target) {
-        return Err(
-            error_stack::Report::new(AppError::Validation).attach_printable(format!(
-                "Directory B ({}) must be within target directory ({})",
-                dir_b, target_dir
+                target
             )),
         );
     }
 
     println!("Validation passed:");
-    println!("  Source directory: {}", source_dir);
-    println!("  Target directory: {}", target_dir);
-    println!("  Directory A (within source): {}", dir_a);
-    println!("  Directory B (within target): {}", dir_b);
+    println!("  Source directory: {}", source);
+    println!("  Target directory: {}", target);
+    
+    // Print warning about target directory needing to be hashed
+    println!("\n⚠️  WARNING: The target directory should be hashed before running copy operations");
+    println!("   to ensure effective duplicate detection. Run:");
+    println!("   {} hash {}", env!("CARGO_PKG_NAME"), target);
 
     Ok(())
 }
@@ -865,15 +800,13 @@ async fn main() -> Result<(), AppError> {
             println!("Directory scanning and hashing completed");
         }
         Commands::Copy {
-            source_dir,
-            target_dir,
-            dir_a,
-            dir_b,
+            source,
+            target,
             dry_run,
         } => {
             println!("Running copy command");
-            validate_copy_command(&source_dir, &target_dir, &dir_a, &dir_b)?;
-            copy_files_without_duplicates(&dir_a, &dir_b, &db, &multi, dry_run).await?;
+            validate_copy_command(&source, &target)?;
+            copy_files_without_duplicates(&source, &target, &db, &multi, dry_run).await?;
             println!("Copy operation completed");
         }
         Commands::Cleanup { dry_run } => {
