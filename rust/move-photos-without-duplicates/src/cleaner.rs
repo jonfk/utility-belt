@@ -1,5 +1,6 @@
 use crate::db::{CopiedFileRecord, Database, DuplicateFileRecord};
 use crate::progress::ProgressManager;
+use crate::scanner::FileScanner;
 use crate::types::{AppError, CleanupOperationResult, SingleCleanupResult};
 use error_stack::{Result, ResultExt};
 use indicatif::MultiProgress;
@@ -15,6 +16,7 @@ impl FileCleaner {
     pub async fn cleanup_tracked_files(
         &self,
         db: &Database,
+        scanner: &FileScanner,
         multi: &MultiProgress,
         dry_run: bool,
     ) -> Result<CleanupOperationResult, AppError> {
@@ -58,7 +60,7 @@ impl FileCleaner {
 
         println!("\n=== PROCESSING COPIED FILES ===");
         for copied_file in copied_files {
-            match self.cleanup_copied_file(&copied_file, db, dry_run).await {
+            match self.cleanup_copied_file(&copied_file, db, scanner, dry_run).await {
                 Ok(SingleCleanupResult::Deleted) => {
                     result.deleted += 1;
                     println!(
@@ -87,7 +89,7 @@ impl FileCleaner {
 
         println!("\n=== PROCESSING DUPLICATE FILES ===");
         for duplicate_file in duplicate_files {
-            match self.cleanup_duplicate_file(&duplicate_file, db, dry_run).await {
+            match self.cleanup_duplicate_file(&duplicate_file, db, scanner, dry_run).await {
                 Ok(SingleCleanupResult::Deleted) => {
                     result.deleted += 1;
                     println!(
@@ -218,6 +220,7 @@ impl FileCleaner {
         &self,
         copied_file: &CopiedFileRecord,
         db: &Database,
+        scanner: &FileScanner,
         dry_run: bool,
     ) -> Result<SingleCleanupResult, AppError> {
         // Check if target file still exists to verify the copy was successful
@@ -225,6 +228,21 @@ impl FileCleaner {
             return Ok(SingleCleanupResult::Skipped(
                 "target file no longer exists - copy may have failed".to_string(),
             ));
+        }
+
+        // Verify target file integrity by checking its hash matches the stored hash
+        if !dry_run {
+            let target_hash = scanner.calculate_file_hash(&copied_file.target_path)
+                .change_context(AppError::Cleanup)
+                .attach_printable_lazy(|| {
+                    format!("Failed to calculate hash for target file: {}", copied_file.target_path)
+                })?;
+            
+            if target_hash != copied_file.hash {
+                return Ok(SingleCleanupResult::Skipped(
+                    "target hash mismatch; refusing to delete source".to_string(),
+                ));
+            }
         }
 
         // Check if source file still exists
@@ -275,6 +293,7 @@ impl FileCleaner {
         &self,
         duplicate_file: &DuplicateFileRecord,
         db: &Database,
+        scanner: &FileScanner,
         dry_run: bool,
     ) -> Result<SingleCleanupResult, AppError> {
         // Check if duplicate file still exists
@@ -294,6 +313,27 @@ impl FileCleaner {
             return Ok(SingleCleanupResult::Skipped(
                 "duplicate file already deleted".to_string(),
             ));
+        }
+
+        // Verify original file still exists and has correct hash before deleting duplicate
+        if !dry_run {
+            if !duplicate_file.original_path.exists() {
+                return Ok(SingleCleanupResult::Skipped(
+                    "original file no longer exists; refusing to delete duplicate".to_string(),
+                ));
+            }
+
+            let original_hash = scanner.calculate_file_hash(&duplicate_file.original_path)
+                .change_context(AppError::Cleanup)
+                .attach_printable_lazy(|| {
+                    format!("Failed to calculate hash for original file: {}", duplicate_file.original_path)
+                })?;
+            
+            if original_hash != duplicate_file.hash {
+                return Ok(SingleCleanupResult::Skipped(
+                    "original hash mismatch; refusing to delete duplicate".to_string(),
+                ));
+            }
         }
 
         if dry_run {
