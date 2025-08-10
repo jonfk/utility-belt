@@ -254,25 +254,14 @@ impl FileCopier {
                 format!("Failed to copy {} to {}", file_path, target_path)
             })?;
 
-        // Store hash in database for the new file
+        // Record the copied file atomically (both hash storage and copy tracking)
         let file_size = metadata.len();
         if let Err(e) = db
-            .upsert_file_hash(&target_path, &file_hash, file_size, last_modified)
+            .record_copied_file(file_path, &target_path, &file_hash, file_size, last_modified)
             .await
         {
             eprintln!(
-                "WARNING: Failed to store hash for copied file {}: {:?}",
-                target_path, e
-            );
-        }
-
-        // Track this as a copied file
-        if let Err(e) = db
-            .track_copied_file(file_path, &target_path, &file_hash, file_size)
-            .await
-        {
-            eprintln!(
-                "WARNING: Failed to track copied file {} -> {}: {:?}",
+                "WARNING: Failed to record copied file {} -> {}: {:?}",
                 file_path, target_path, e
             );
         }
