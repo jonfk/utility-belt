@@ -1,7 +1,7 @@
 use camino::Utf8PathBuf;
 use error_stack::{Report, Result, ResultExt};
-use sqlx::{Row, SqlitePool};
 use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 use std::time::SystemTime;
 use thiserror::Error;
@@ -68,7 +68,9 @@ impl Database {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .change_context(DatabaseError::Connection)
-                .attach_printable_lazy(|| format!("Failed to create database directory: {}", parent))?;
+                .attach_printable_lazy(|| {
+                    format!("Failed to create database directory: {}", parent)
+                })?;
         }
 
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_path))
@@ -98,11 +100,14 @@ impl Database {
         file_size: u64,
         last_modified: SystemTime,
     ) -> Result<(), DatabaseError> {
-        let filename = file_path.file_name().unwrap_or("unknown");
+        let filename = file_path.file_name().expect(&format!(
+            "Unexpectedly could not get filename. file_path = {}",
+            file_path
+        ));
 
         let last_modified_secs = last_modified
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
+            .expect("Could not get Unix seconds timestamp from SystemTime")
             .as_secs() as i64;
 
         sqlx::query(
@@ -133,7 +138,11 @@ impl Database {
         &self,
         file_infos: &[crate::FileInfo],
     ) -> Result<(), DatabaseError> {
-        let mut tx = self.pool.begin().await.change_context(DatabaseError::Insert)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .change_context(DatabaseError::Insert)?;
 
         for file_info in file_infos {
             let filename = file_info.path.file_name().unwrap_or("unknown");
