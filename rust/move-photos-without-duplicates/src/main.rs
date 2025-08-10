@@ -77,6 +77,12 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Show status of files that would be deleted by cleanup
+    Status {
+        /// Show detailed list of all file paths that would be deleted
+        #[arg(long)]
+        detailed: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -779,6 +785,83 @@ async fn cleanup_duplicate_file(
     Ok(CleanupResult::Deleted)
 }
 
+async fn show_status(
+    db: &Database,
+    multi: &MultiProgress,
+    detailed: bool,
+) -> Result<(), AppError> {
+    println!("Retrieving status of files tracked for cleanup...");
+
+    // Get tracked files from database with spinner
+    let scan_pb = multi.add(ProgressBar::new_spinner());
+    scan_pb.set_style(
+        ProgressStyle::with_template("🔍 {spinner:.green} {wide_msg}")
+            .unwrap()
+            .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ "),
+    );
+    scan_pb.set_message("Loading tracked files from database...");
+
+    let copied_files = db
+        .get_copied_files()
+        .await
+        .change_context(AppError::DB)
+        .attach_printable("Failed to retrieve copied files")?;
+
+    let duplicate_files = db
+        .get_duplicate_files()
+        .await
+        .change_context(AppError::DB)
+        .attach_printable("Failed to retrieve duplicate files")?;
+
+    scan_pb.finish_with_message("✓ Status retrieved");
+
+    // Calculate statistics
+    let copied_count = copied_files.len();
+    let duplicate_count = duplicate_files.len();
+    let total_files = copied_count + duplicate_count;
+
+    let copied_total_size: u64 = copied_files.iter().map(|f| f.file_size).sum();
+    let duplicate_total_size: u64 = duplicate_files.iter().map(|f| f.file_size).sum();
+    let total_size = copied_total_size + duplicate_total_size;
+
+    // Display summary
+    println!("\n=== CLEANUP STATUS SUMMARY ===");
+    println!("Files that would be deleted by cleanup command:");
+    println!("  Copied files (source files): {}", copied_count);
+    println!("  Duplicate files: {}", duplicate_count);
+    println!("  Total files: {}", total_files);
+    
+    if total_size > 0 {
+        println!("  Total size: {} bytes ({:.2} MB)", total_size, total_size as f64 / (1024.0 * 1024.0));
+    }
+
+    if total_files == 0 {
+        println!("\n✓ No files are currently tracked for cleanup");
+        return Ok(());
+    }
+
+    // Show detailed listing if requested
+    if detailed {
+        if copied_count > 0 {
+            println!("\n=== COPIED FILES (source files that would be deleted) ===");
+            for copied_file in &copied_files {
+                println!("  {} -> {}", copied_file.source_path, copied_file.target_path);
+            }
+        }
+
+        if duplicate_count > 0 {
+            println!("\n=== DUPLICATE FILES (that would be deleted) ===");
+            for duplicate_file in &duplicate_files {
+                println!("  {} (duplicate of: {})", duplicate_file.duplicate_path, duplicate_file.original_path);
+            }
+        }
+    } else if total_files > 0 {
+        println!("\nUse --detailed to see the full list of file paths that would be deleted.");
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let args = Args::parse();
@@ -813,6 +896,9 @@ async fn main() -> Result<(), AppError> {
             println!("Running cleanup command");
             cleanup_tracked_files(&db, &multi, dry_run).await?;
             println!("Cleanup operation completed");
+        }
+        Commands::Status { detailed } => {
+            show_status(&db, &multi, detailed).await?;
         }
     }
 
