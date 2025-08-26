@@ -1,4 +1,5 @@
-const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer');
+const puppeteerCore = require('puppeteer-core');
 const chrome = require('chrome-launcher');
 const sanitize = require('sanitize-filename');
 const moment = require('moment');
@@ -7,12 +8,36 @@ const fs = require('fs');
 const path = require('path');
 const csv = require('csv-parse/sync');
 
-async function getBrowser() {
-    const chromePath = await chrome.getChromePath();
-    return puppeteer.launch({
-        executablePath: chromePath,
-        headless: "new"
-    });
+async function getBrowser(forceBundled = false) {
+    if (forceBundled) {
+        // Force bundled Chrome usage
+        try {
+            return await puppeteer.launch({
+                headless: "new"
+            });
+        } catch (error) {
+            throw new Error(`Failed to launch bundled Chrome: ${error.message}`);
+        }
+    }
+    
+    try {
+        // First try system Chrome
+        const chromePath = await chrome.getChromePath();
+        return await puppeteerCore.launch({
+            executablePath: chromePath,
+            headless: "new"
+        });
+    } catch (error) {
+        console.log('System Chrome not available, trying bundled Chrome...');
+        try {
+            // Fallback to bundled Chrome
+            return await puppeteer.launch({
+                headless: "new"
+            });
+        } catch (fallbackError) {
+            throw new Error(`Failed to launch browser: System Chrome failed (${error.message}), Bundled Chrome failed (${fallbackError.message})`);
+        }
+    }
 }
 
 
@@ -188,13 +213,23 @@ function getArgs() {
     const isPackaged = !process.argv[0].endsWith('node') && !process.argv[0].endsWith('node.exe');
     const args = isPackaged ? process.argv.slice(1) : process.argv.slice(2);
     
+    // Check for --bundled-chrome flag
+    const bundledChromeIndex = args.findIndex(arg => arg === '--bundled-chrome');
+    const useBundledChrome = bundledChromeIndex !== -1;
+    
+    // Remove the flag from args for further processing
+    if (useBundledChrome) {
+        args.splice(bundledChromeIndex, 1);
+    }
+    
     // Parse for --file parameter
     const fileIndex = args.findIndex(arg => arg === '--file');
     if (fileIndex !== -1 && fileIndex + 1 < args.length) {
         return {
             isPackaged,
             mode: 'file',
-            filePath: args[fileIndex + 1]
+            filePath: args[fileIndex + 1],
+            useBundledChrome
         };
     }
     
@@ -203,7 +238,8 @@ function getArgs() {
         isPackaged,
         mode: 'url',
         url: args[0],
-        prefix: args[1] || ''
+        prefix: args[1] || '',
+        useBundledChrome
     };
 }
 
@@ -211,8 +247,8 @@ function showHelp(isPackaged) {
     const command = isPackaged ? 'video-downloader' : 'node script.js';
     console.log(`
 Usage: 
-    ${command} [URL] [prefix]
-    ${command} --file [filepath]
+    ${command} [URL] [prefix] [--bundled-chrome]
+    ${command} --file [filepath] [--bundled-chrome]
 
 Arguments:
     URL        The video page URL to download from
@@ -220,8 +256,13 @@ Arguments:
     filepath   Path to a CSV file containing URLs and optional prefixes
 
 Options:
-    -h, --help  Show this help message
-    --file      Process multiple URLs from a CSV file
+    -h, --help         Show this help message
+    --file             Process multiple URLs from a CSV file
+    --bundled-chrome   Force use of bundled Chrome instead of system Chrome
+
+Browser Selection:
+    By default, the script tries to use system Chrome first, then falls back to bundled Chrome.
+    Use --bundled-chrome to force bundled Chrome usage (useful if system Chrome has issues).
 
 CSV File Format:
     The CSV file should have a header row with "url,prefix"
@@ -230,6 +271,8 @@ CSV File Format:
 Examples:
     ${command} https://example.com/video "My Video"
     ${command} --file videos.csv
+    ${command} https://example.com/video --bundled-chrome
+    ${command} --file videos.csv --bundled-chrome
 `);
     process.exit(0);
 }
@@ -320,7 +363,7 @@ async function main() {
         showHelp(args.isPackaged);
     }
     
-    const browser = await getBrowser();
+    const browser = await getBrowser(args.useBundledChrome);
     
     try {
         if (args.mode === 'file') {
