@@ -5,6 +5,12 @@ import path from 'path';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
+import { 
+  UnsupportedUrlError, 
+  VideoSourceNotFoundError, 
+  NetworkError,
+  DownloadFailedError 
+} from '../errors.js';
 
 export interface DownloadJob {
   jobId: string;
@@ -28,7 +34,7 @@ class SxyPrnDownloader implements Downloader {
       
       const videoSrc = await page.$eval('#player_el', el => (el as HTMLVideoElement).src);
       if (!videoSrc) {
-        throw new Error('Could not find video source');
+        throw new VideoSourceNotFoundError('Could not find video source on page');
       }
       
       const canonicalUrl = await this.getCanonicalUrl(videoSrc);
@@ -48,6 +54,13 @@ class SxyPrnDownloader implements Downloader {
         startedAt: startedAt.toISOString(),
         finishedAt: finishedAt.toISOString()
       };
+    } catch (error) {
+      if (error instanceof VideoSourceNotFoundError) {
+        throw error;
+      }
+      throw new DownloadFailedError(`Failed to download video from ${url}`, { 
+        originalError: error instanceof Error ? error.message : String(error) 
+      });
     } finally {
       await page.close();
       await browser.close();
@@ -59,26 +72,43 @@ class SxyPrnDownloader implements Downloader {
       const response = await fetch(videoSrc, { method: 'HEAD' });
       return response.url || videoSrc;
     } catch (error) {
-      console.warn('Could not get canonical URL, using original source:', error);
-      return videoSrc;
+      throw new NetworkError('Could not resolve canonical URL for video source', {
+        videoSrc,
+        originalError: error instanceof Error ? error.message : String(error)
+      });
     }
   }
   
   private async downloadVideo(url: string, outputPath: string): Promise<number> {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch video: ${response.statusText}`);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new NetworkError(`Failed to fetch video: ${response.status} ${response.statusText}`, {
+          url,
+          status: response.status,
+          statusText: response.statusText
+        });
+      }
+      
+      if (!response.body) {
+        throw new NetworkError('Response body is empty', { url });
+      }
+      
+      const writeStream = fs.createWriteStream(outputPath);
+      await pipeline(Readable.fromWeb(response.body as NodeReadableStream), writeStream);
+      
+      const stats = await fs.promises.stat(outputPath);
+      return stats.size;
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        throw error;
+      }
+      throw new DownloadFailedError('Failed to download and save video file', {
+        url,
+        outputPath,
+        originalError: error instanceof Error ? error.message : String(error)
+      });
     }
-    
-    if (!response.body) {
-      throw new Error('No response body');
-    }
-    
-    const writeStream = fs.createWriteStream(outputPath);
-    await pipeline(Readable.fromWeb(response.body as NodeReadableStream), writeStream);
-    
-    const stats = await fs.promises.stat(outputPath);
-    return stats.size;
   }
 }
 
@@ -134,7 +164,7 @@ export class DownloadService {
       if (urlObj.hostname.includes('sxyprn.com')) {
         downloader = this.sxyPrnDownloader;
       } else {
-        throw new Error('Not implemented');
+        throw new UnsupportedUrlError(`URL hostname not supported: ${urlObj.hostname}`);
       }
       
       const result = await downloader.download(job.url, job.name);

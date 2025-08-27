@@ -30,18 +30,9 @@ export async function registerRoutes(fastify: FastifyInstance) {
 			},
 		},
 	}, async (request, reply) => {
-		try {
-			const { url } = request.body;
-			const name = await nameResolver.resolveName(url);
-			return { name };
-		} catch (error) {
-			if (error instanceof Error && error.message === 'Not implemented') {
-				reply.code(400);
-				throw fastify.httpErrors.badRequest('URL not supported');
-			}
-			reply.code(500);
-			throw fastify.httpErrors.internalServerError('Failed to resolve name');
-		}
+		const { url } = request.body;
+		const name = await nameResolver.resolveName(url);
+		return { name };
 	});
 
 	fastify.post<{
@@ -55,14 +46,9 @@ export async function registerRoutes(fastify: FastifyInstance) {
 			},
 		},
 	}, async (request, reply) => {
-		try {
-			const { url, name } = request.body;
-			const jobId = downloadService.enqueue(url, name);
-			return { jobId, status: 'enqueued' };
-		} catch (error) {
-			reply.code(500);
-			throw fastify.httpErrors.internalServerError('Failed to enqueue download');
-		}
+		const { url, name } = request.body;
+		const jobId = downloadService.enqueue(url, name);
+		return { jobId, status: 'enqueued' };
 	});
 
 	fastify.get<{

@@ -5,6 +5,7 @@ import { config } from './config.js';
 import { registerRoutes } from './routes.js';
 import { ensureDataDir } from './storage.js';
 import { closeBrowser } from './puppeteer.js';
+import { registerErrorHandler } from './error-handler.js';
 
 const fastify = Fastify({
   logger: true,
@@ -13,6 +14,7 @@ const fastify = Fastify({
 async function start() {
   try {
     await fastify.register(sensible);
+    await registerErrorHandler(fastify);
     await registerRoutes(fastify);
     await ensureDataDir();
 

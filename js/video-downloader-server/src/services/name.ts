@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer';
 import moment from 'moment';
 import { sanitizeFilename } from '../storage.js';
+import { UnsupportedUrlError, NameResolutionError } from '../errors.js';
 
 export interface NameResolver {
   resolveName(url: string): Promise<string>;
@@ -16,6 +17,10 @@ export class SxyPrnNameResolver implements NameResolver {
       const title = await page.title();
       const processedTitle = await this.processTitle(title);
       return processedTitle;
+    } catch (error) {
+      throw new NameResolutionError(`Failed to resolve name for URL: ${url}`, { 
+        originalError: error instanceof Error ? error.message : String(error) 
+      });
     } finally {
       await page.close();
       await browser.close();
@@ -87,6 +92,6 @@ export class DefaultNameResolver implements NameResolver {
       return this.sxyPrnResolver.resolveName(url);
     }
     
-    throw new Error('Not implemented');
+    throw new UnsupportedUrlError(`URL hostname not supported: ${urlObj.hostname}`);
   }
 }
