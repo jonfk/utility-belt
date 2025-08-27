@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
+import type { ReadableStream as NodeReadableStream } from 'stream/web';
 
 export interface DownloadJob {
   jobId: string;
@@ -18,7 +19,7 @@ interface Downloader {
 
 class SxyPrnDownloader implements Downloader {
   async download(url: string, name: string): Promise<CompletedDownload> {
-    const browser = await puppeteer.launch({ headless: 'new' });
+    const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
     
     try {
@@ -74,7 +75,7 @@ class SxyPrnDownloader implements Downloader {
     }
     
     const writeStream = fs.createWriteStream(outputPath);
-    await pipeline(Readable.fromWeb(response.body), writeStream);
+    await pipeline(Readable.fromWeb(response.body as NodeReadableStream), writeStream);
     
     const stats = await fs.promises.stat(outputPath);
     return stats.size;

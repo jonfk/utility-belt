@@ -1,6 +1,6 @@
 import puppeteer from 'puppeteer';
-import sanitize from 'sanitize-filename';
 import moment from 'moment';
+import { sanitizeFilename } from '../storage.js';
 
 export interface NameResolver {
   resolveName(url: string): Promise<string>;
@@ -8,7 +8,7 @@ export interface NameResolver {
 
 export class SxyPrnNameResolver implements NameResolver {
   async resolveName(url: string): Promise<string> {
-    const browser = await puppeteer.launch({ headless: 'new' });
+    const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
     
     try {
@@ -73,7 +73,7 @@ export class SxyPrnNameResolver implements NameResolver {
       title = `${extractedDate}_${title}`;
     }
     
-    return sanitize(title);
+    return sanitizeFilename(title);
   }
 }
 

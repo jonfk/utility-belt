@@ -10,8 +10,12 @@ export async function ensureDataDir(): Promise<void> {
   }
 }
 
+export function sanitizeFilename(filename: string): string {
+  return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
 export function getSafeFilePath(filename: string): string {
-  const sanitized = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const sanitized = sanitizeFilename(filename);
   return path.join(config.dataDir, sanitized);
 }
 
