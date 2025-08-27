@@ -13,8 +13,12 @@ import {
   type CompletedDownloadsResponse,
   type HealthResponse,
 } from './schemas.js';
+import { DefaultNameResolver } from './services/name.js';
+import { DownloadService } from './services/download.js';
 
 export async function registerRoutes(fastify: FastifyInstance) {
+  const nameResolver = new DefaultNameResolver();
+  const downloadService = new DownloadService();
   fastify.post<{
     Body: NameRequest;
     Reply: NameResponse;
@@ -26,8 +30,18 @@ export async function registerRoutes(fastify: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
-    reply.code(501);
-    throw fastify.httpErrors.notImplemented('Name resolution not implemented');
+    try {
+      const { url } = request.body;
+      const name = await nameResolver.resolveName(url);
+      return { name };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Not implemented') {
+        reply.code(400);
+        throw fastify.httpErrors.badRequest('URL not supported');
+      }
+      reply.code(500);
+      throw fastify.httpErrors.internalServerError('Failed to resolve name');
+    }
   });
 
   fastify.post<{
@@ -41,8 +55,14 @@ export async function registerRoutes(fastify: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
-    reply.code(501);
-    throw fastify.httpErrors.notImplemented('Download not implemented');
+    try {
+      const { url, name } = request.body;
+      const jobId = downloadService.enqueue(url, name);
+      return { jobId };
+    } catch (error) {
+      reply.code(500);
+      throw fastify.httpErrors.internalServerError('Failed to enqueue download');
+    }
   });
 
   fastify.get<{
@@ -54,8 +74,8 @@ export async function registerRoutes(fastify: FastifyInstance) {
       },
     },
   }, async (request, reply) => {
-    reply.code(501);
-    throw fastify.httpErrors.notImplemented('Downloads list not implemented');
+    const downloads = downloadService.getCompleted();
+    return { downloads };
   });
 
   fastify.get<{
