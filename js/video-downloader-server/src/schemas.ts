@@ -27,7 +27,9 @@ export const CompletedDownloadSchema = Type.Object({
   finishedAt: Type.String({ format: 'date-time' }),
 });
 
-export const CompletedDownloadsResponseSchema = Type.Array(CompletedDownloadSchema);
+export const CompletedDownloadsResponseSchema = Type.Object({
+  downloads: Type.Array(CompletedDownloadSchema),
+});
 
 export const HealthResponseSchema = Type.Object({
   status: Type.Literal('ok'),
