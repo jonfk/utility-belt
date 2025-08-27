@@ -5,6 +5,8 @@ import path from 'path';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
+import { EventEmitter } from 'events';
+import type { FastifyBaseLogger } from 'fastify';
 import { 
   UnsupportedUrlError, 
   VideoSourceNotFoundError, 
@@ -112,11 +114,17 @@ class SxyPrnDownloader implements Downloader {
   }
 }
 
-export class DownloadService {
+export class DownloadService extends EventEmitter {
   private queue: DownloadJob[] = [];
   private completed: CompletedDownload[] = [];
-  private processing = false;
   private sxyPrnDownloader = new SxyPrnDownloader();
+  private logger: FastifyBaseLogger;
+
+  constructor(logger: FastifyBaseLogger) {
+    super();
+    this.logger = logger;
+    this.startProcessor();
+  }
 
   enqueue(url: string, name: string): string {
     const jobId = this.generateJobId();
@@ -127,7 +135,7 @@ export class DownloadService {
       enqueuedAt: new Date(),
     };
     this.queue.push(job);
-    this.processQueue();
+    this.emit('jobAdded');
     return jobId;
   }
 
@@ -144,16 +152,22 @@ export class DownloadService {
     return result;
   }
 
-  private async processQueue(): Promise<void> {
-    if (this.processing) return;
-    this.processing = true;
+  private async startProcessor(): Promise<void> {
+    this.processLoop().catch(error => {
+      this.logger.error({ error }, 'Download processor crashed');
+    });
+  }
 
-    while (this.queue.length > 0) {
+  private async processLoop(): Promise<void> {
+    while (true) {
+      if (this.queue.length === 0) {
+        await new Promise<void>(resolve => this.once('jobAdded', resolve));
+        continue;
+      }
+
       const job = this.queue.shift()!;
       await this.processJob(job);
     }
-
-    this.processing = false;
   }
 
   private async processJob(job: DownloadJob): Promise<void> {
@@ -170,7 +184,12 @@ export class DownloadService {
       const result = await downloader.download(job.url, job.name);
       this.completed.push(result);
     } catch (error) {
-      console.error(`Failed to process job ${job.jobId}:`, error);
+      this.logger.error({ 
+        jobId: job.jobId, 
+        url: job.url, 
+        name: job.name,
+        error 
+      }, 'Failed to process download job');
     }
   }
 }

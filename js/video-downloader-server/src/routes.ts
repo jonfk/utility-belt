@@ -18,7 +18,7 @@ import { DownloadService } from './services/download.js';
 
 export async function registerRoutes(fastify: FastifyInstance) {
 	const nameResolver = new DefaultNameResolver();
-	const downloadService = new DownloadService();
+	const downloadService = new DownloadService(fastify.log);
 	fastify.post<{
 		Body: NameRequest;
 		Reply: NameResponse;
