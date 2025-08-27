@@ -82,7 +82,18 @@ Fastify’s TypeScript guide shows how to wire TypeBox so the same schema powers
 
 See https://fastify.dev/docs/latest/Reference/Type-Providers/#typebox
 
-## Puppeteer Infra (optional)
+- Error schemas: 4xx/5xx responses should reference the shared error schema installed by `@fastify/sensible` (e.g., `{ $ref: 'HttpError' }`) to keep error payloads consistent across routes.
+
+## Errors & Error Handling
+
+- One root handler: register `setErrorHandler` once (in `src/error-handler.ts`) during app boot. Fastify error handlers are encapsulated per plugin—keep a single root error handler on the root instance for consistent behavior.
+- 404s separately: use `setNotFoundHandler` for unknown routes; these do not pass through the standard error handler.
+- Validation errors: Fastify sets `error.statusCode = 400` for validation failures. The handler should echo that status and format the body; no special-case logic needed beyond checking `error.statusCode`.
+- Domain errors: define a tiny `AppError` in `src/errors.ts` with fields `{ code, statusCode, message, details? }` and a few specific errors (e.g., `InvalidUrlError` → 400, `NameResolutionError` → 422, `QueueFullError` → 429, `DownloadFailedError` → 502/504). Services throw these; the handler maps them to HTTP.
+- Unknown errors: map to 500 with a generic payload; never leak stack traces by default.
+- Use `@fastify/sensible`: register it to get `httpErrors` helpers and (optionally) install a shared JSON Schema for error responses via `sharedSchemaId: 'HttpError'`.
+
+## Puppeteer Infra
 
 - Lifecycle: create one Browser on startup, reuse it; strategies that use Puppeteer create a Page per job and close it after. Keeps memory predictable.
 
@@ -118,6 +129,8 @@ src/
 ├─ puppeteer.ts       # singleton Browser + helpers
 ├─ storage.ts         # DATA_DIR, path safety, fs ops
 ├─ config.ts          # env + defaults
+├─ error-handler.ts   # single root error handler plugin (register at boot)
+├─ errors.ts          # AppError base + small set of domain errors
 └─ services/
    ├─ name.ts         # NameResolver (split out)
    └─ download.ts     # tiny FIFO queue + completed list + strategy dispatch
@@ -128,6 +141,8 @@ src/
 - Validation: JSON Schema + TypeBox (officially recommended pattern) keeps you fast and typed.
 - Utilities: `@fastify/sensible` gives small helpers (e.g., `httpErrors`) without bloating code.
 - Ecosystem: if you later want OpenAPI or graceful exit helpers, the Fastify ecosystem has drop-in plugins—optional for now to keep things simple.
+- Register order: register `error-handler.ts` and `setNotFoundHandler` on the root Fastify instance to avoid per-plugin divergence due to encapsulation.
+- Error shape: standardize error JSON as `{ code, message, statusCode, details? }`. Validation errors keep Fastify’s `400`; domain errors use their declared `statusCode`; unknowns become `500`.
 
 ## Download Flow (Implementation Sketch)
 
