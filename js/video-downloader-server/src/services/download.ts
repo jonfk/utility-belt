@@ -22,7 +22,7 @@ export interface DownloadJob {
 }
 
 interface Downloader {
-  download(url: string, name: string): Promise<CompletedDownload>;
+  download(jobId: string, url: string, name: string): Promise<CompletedDownload>;
 }
 
 class SxyPrnDownloader implements Downloader {
@@ -32,41 +32,40 @@ class SxyPrnDownloader implements Downloader {
     this.logger = logger;
   }
 
-  async download(url: string, name: string): Promise<CompletedDownload> {
-    this.logger.info({ url, name }, 'Starting video download from SxyPrn');
+  async download(jobId: string, url: string, name: string): Promise<CompletedDownload> {
+    const jobLogger = this.logger.child({ jobId, url, name });
+    jobLogger.info('Starting video download from SxyPrn');
     
     const browser = await getBrowser();
     const page = await browser.newPage();
     
     try {
-      this.logger.debug({ url }, 'Navigating to video page');
+      jobLogger.debug('Navigating to video page');
       await page.goto(url, { waitUntil: 'networkidle0' });
       
-      this.logger.debug({ url }, 'Waiting for video player element');
+      jobLogger.debug('Waiting for video player element');
       await page.waitForSelector('#player_el');
       
-      this.logger.debug({ url }, 'Extracting video source URL');
+      jobLogger.debug('Extracting video source URL');
       const videoSrc = await page.$eval('#player_el', el => (el as HTMLVideoElement).src);
       if (!videoSrc) {
         throw new VideoSourceNotFoundError('Could not find video source on page');
       }
       
-      this.logger.info({ url, videoSrc }, 'Found video source, resolving canonical URL');
+      jobLogger.info({ videoSrc }, 'Found video source, resolving canonical URL');
       const canonicalUrl = await this.getCanonicalUrl(videoSrc);
       const outputPath = path.join(process.cwd(), 'data', `${name}.mp4`);
       
-      this.logger.debug({ outputPath }, 'Creating output directory');
+      jobLogger.debug({ outputPath }, 'Creating output directory');
       await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
       
       const startedAt = new Date();
-      this.logger.info({ url, canonicalUrl, outputPath }, 'Starting video file download');
+      jobLogger.info({ canonicalUrl, outputPath }, 'Starting video file download');
       const size = await this.downloadVideo(canonicalUrl, outputPath);
       const finishedAt = new Date();
       
       const downloadDuration = finishedAt.getTime() - startedAt.getTime();
-      this.logger.info({ 
-        url, 
-        name,
+      jobLogger.info({ 
         outputPath,
         size, 
         downloadDuration 
@@ -81,7 +80,7 @@ class SxyPrnDownloader implements Downloader {
         finishedAt: finishedAt.toISOString()
       };
     } catch (error) {
-      this.logger.error({ url, name, error }, 'Video download failed');
+      jobLogger.error({ error }, 'Video download failed');
       if (error instanceof VideoSourceNotFoundError) {
         throw error;
       }
@@ -224,7 +223,7 @@ export class DownloadService extends EventEmitter {
         throw new UnsupportedUrlError(`URL hostname not supported: ${urlObj.hostname}`);
       }
       
-      const result = await downloader.download(job.url, job.name);
+      const result = await downloader.download(job.jobId, job.url, job.name);
       this.completed.push(result);
       
       const endTime = Date.now();
