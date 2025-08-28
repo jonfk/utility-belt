@@ -26,27 +26,51 @@ interface Downloader {
 }
 
 class SxyPrnDownloader implements Downloader {
+  private logger: FastifyBaseLogger;
+
+  constructor(logger: FastifyBaseLogger) {
+    this.logger = logger;
+  }
+
   async download(url: string, name: string): Promise<CompletedDownload> {
+    this.logger.info({ url, name }, 'Starting video download from SxyPrn');
+    
     const browser = await getBrowser();
     const page = await browser.newPage();
     
     try {
+      this.logger.debug({ url }, 'Navigating to video page');
       await page.goto(url, { waitUntil: 'networkidle0' });
+      
+      this.logger.debug({ url }, 'Waiting for video player element');
       await page.waitForSelector('#player_el');
       
+      this.logger.debug({ url }, 'Extracting video source URL');
       const videoSrc = await page.$eval('#player_el', el => (el as HTMLVideoElement).src);
       if (!videoSrc) {
         throw new VideoSourceNotFoundError('Could not find video source on page');
       }
       
+      this.logger.info({ url, videoSrc }, 'Found video source, resolving canonical URL');
       const canonicalUrl = await this.getCanonicalUrl(videoSrc);
       const outputPath = path.join(process.cwd(), 'data', `${name}.mp4`);
       
+      this.logger.debug({ outputPath }, 'Creating output directory');
       await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
       
       const startedAt = new Date();
+      this.logger.info({ url, canonicalUrl, outputPath }, 'Starting video file download');
       const size = await this.downloadVideo(canonicalUrl, outputPath);
       const finishedAt = new Date();
+      
+      const downloadDuration = finishedAt.getTime() - startedAt.getTime();
+      this.logger.info({ 
+        url, 
+        name,
+        outputPath,
+        size, 
+        downloadDuration 
+      }, 'Video download completed successfully');
       
       return {
         url,
@@ -57,6 +81,7 @@ class SxyPrnDownloader implements Downloader {
         finishedAt: finishedAt.toISOString()
       };
     } catch (error) {
+      this.logger.error({ url, name, error }, 'Video download failed');
       if (error instanceof VideoSourceNotFoundError) {
         throw error;
       }
@@ -116,12 +141,13 @@ class SxyPrnDownloader implements Downloader {
 export class DownloadService extends EventEmitter {
   private queue: DownloadJob[] = [];
   private completed: CompletedDownload[] = [];
-  private sxyPrnDownloader = new SxyPrnDownloader();
+  private sxyPrnDownloader: SxyPrnDownloader;
   private logger: FastifyBaseLogger;
 
   constructor(logger: FastifyBaseLogger) {
     super();
     this.logger = logger;
+    this.sxyPrnDownloader = new SxyPrnDownloader(logger);
     this.startProcessor();
   }
 
@@ -134,6 +160,14 @@ export class DownloadService extends EventEmitter {
       enqueuedAt: new Date(),
     };
     this.queue.push(job);
+    
+    this.logger.info({
+      jobId,
+      url,
+      name,
+      queueLength: this.queue.length
+    }, 'Download job enqueued');
+    
     this.emit('jobAdded');
     return jobId;
   }
@@ -170,6 +204,16 @@ export class DownloadService extends EventEmitter {
   }
 
   private async processJob(job: DownloadJob): Promise<void> {
+    const startTime = Date.now();
+    
+    this.logger.info({
+      jobId: job.jobId,
+      url: job.url,
+      name: job.name,
+      enqueuedAt: job.enqueuedAt,
+      waitTime: startTime - job.enqueuedAt.getTime()
+    }, 'Starting download job processing');
+    
     try {
       const urlObj = new URL(job.url);
       let downloader: Downloader;
@@ -182,11 +226,30 @@ export class DownloadService extends EventEmitter {
       
       const result = await downloader.download(job.url, job.name);
       this.completed.push(result);
+      
+      const endTime = Date.now();
+      const processingTime = endTime - startTime;
+      
+      this.logger.info({
+        jobId: job.jobId,
+        url: job.url,
+        name: job.name,
+        savedPath: result.savedPath,
+        size: result.size,
+        processingTime,
+        startedAt: result.startedAt,
+        finishedAt: result.finishedAt
+      }, 'Download job completed successfully');
+      
     } catch (error) {
+      const endTime = Date.now();
+      const processingTime = endTime - startTime;
+      
       this.logger.error({ 
         jobId: job.jobId, 
         url: job.url, 
         name: job.name,
+        processingTime,
         error 
       }, 'Failed to process download job');
     }
