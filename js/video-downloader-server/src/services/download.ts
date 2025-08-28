@@ -1,5 +1,4 @@
 import type { CompletedDownload } from '../schemas.js';
-import puppeteer from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
 import { pipeline } from 'stream/promises';
@@ -13,6 +12,7 @@ import {
   NetworkError,
   DownloadFailedError 
 } from '../errors.js';
+import { getBrowser } from '../puppeteer.js';
 
 export interface DownloadJob {
   jobId: string;
@@ -27,7 +27,7 @@ interface Downloader {
 
 class SxyPrnDownloader implements Downloader {
   async download(url: string, name: string): Promise<CompletedDownload> {
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await getBrowser();
     const page = await browser.newPage();
     
     try {
@@ -65,7 +65,6 @@ class SxyPrnDownloader implements Downloader {
       });
     } finally {
       await page.close();
-      await browser.close();
     }
   }
   

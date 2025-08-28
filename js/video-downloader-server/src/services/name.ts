@@ -1,7 +1,7 @@
-import puppeteer from 'puppeteer';
 import moment from 'moment';
 import { sanitizeFilename } from '../storage.js';
 import { UnsupportedUrlError, NameResolutionError } from '../errors.js';
+import { getBrowser } from '../puppeteer.js';
 
 export interface NameResolver {
   resolveName(url: string): Promise<string>;
@@ -9,7 +9,7 @@ export interface NameResolver {
 
 export class SxyPrnNameResolver implements NameResolver {
   async resolveName(url: string): Promise<string> {
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await getBrowser();
     const page = await browser.newPage();
     
     try {
@@ -23,7 +23,6 @@ export class SxyPrnNameResolver implements NameResolver {
       });
     } finally {
       await page.close();
-      await browser.close();
     }
   }
 

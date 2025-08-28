@@ -5,8 +5,11 @@ let browser: Browser | null = null;
 
 export async function getBrowser(): Promise<Browser> {
 	if (!browser) {
+		const args = ['--no-sandbox', '--disable-dev-shm-usage'];
+		
 		browser = await puppeteer.launch({
 			headless: true,
+			args,
 		});
 	}
 	return browser;
