@@ -24,6 +24,9 @@ export async function registerRoutes(fastify: FastifyInstance) {
 		Reply: NameResponse;
 	}>('/v1/name', {
 		schema: {
+			tags: ['Video'],
+			summary: 'Resolve video name',
+			description: 'Extract and resolve the name of a video from its URL',
 			body: NameRequestSchema,
 			response: {
 				200: NameResponseSchema,
@@ -40,6 +43,9 @@ export async function registerRoutes(fastify: FastifyInstance) {
 		Reply: DownloadResponse;
 	}>('/v1/download', {
 		schema: {
+			tags: ['Video'],
+			summary: 'Enqueue video download',
+			description: 'Add a video download job to the queue',
 			body: DownloadRequestSchema,
 			response: {
 				200: DownloadResponseSchema,
@@ -55,6 +61,9 @@ export async function registerRoutes(fastify: FastifyInstance) {
 		Reply: CompletedDownloadsResponse;
 	}>('/v1/downloads/completed', {
 		schema: {
+			tags: ['Downloads'],
+			summary: 'Get completed downloads',
+			description: 'Retrieve list of all completed video downloads',
 			response: {
 				200: CompletedDownloadsResponseSchema,
 			},
@@ -68,6 +77,9 @@ export async function registerRoutes(fastify: FastifyInstance) {
 		Reply: HealthResponse;
 	}>('/healthz', {
 		schema: {
+			tags: ['Health'],
+			summary: 'Health check',
+			description: 'Check server health status',
 			response: {
 				200: HealthResponseSchema,
 			},

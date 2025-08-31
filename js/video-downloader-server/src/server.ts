@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import sensible from '@fastify/sensible';
+import swagger from '@fastify/swagger';
+import swaggerUi from '@fastify/swagger-ui';
 import { config } from './config.js';
 import { registerRoutes } from './routes.js';
 import { ensureDataDir } from './storage.js';
@@ -15,6 +17,31 @@ async function start() {
   try {
     await fastify.register(sensible);
     await registerErrorHandler(fastify);
+
+    await fastify.register(swagger, {
+      openapi: {
+        info: {
+          title: 'Video Downloader Server',
+          description: 'Simple utility service for downloading videos',
+          version: '1.0.0',
+        },
+        servers: [
+          {
+            url: 'http://localhost:3000',
+            description: 'Development server',
+          },
+        ],
+      },
+    });
+
+    await fastify.register(swaggerUi, {
+      routePrefix: '/docs',
+      uiConfig: {
+        docExpansion: 'list',
+        deepLinking: false,
+      },
+    });
+
     await registerRoutes(fastify);
     await ensureDataDir();
 
