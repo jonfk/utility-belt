@@ -37,8 +37,6 @@ Note: `npm test` is a placeholder and currently exits non‑zero (no tests yet).
 - Commits: follow Conventional Commits observed in history, e.g. `feat(scope): …`, `refactor(download): …`, `chore(justfile): …`, `build(video-downloader-server): …`, `docs(server): …`.
 - PRs: small and focused; include:
   - What/why, linked issues, and any config/env changes.
-  - Local run steps and sample requests (e.g., `curl -X POST :3000/v1/download …`).
-  - Logs or screenshots when changing Docker/runtime behavior.
 
 ## Security & Configuration Tips
 - Env vars: `PORT` (default 3000), `DATA_DIR` (default `./data`), `REQUEST_TIMEOUT_MS`.
