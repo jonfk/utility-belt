@@ -55,6 +55,41 @@ export const CompletedDownloadsResponseSchema = Type.Object({
   description: 'List of all completed downloads'
 });
 
+export const DownloadProgressSchema = Type.Object({
+  jobId: Type.String({ description: 'Unique job identifier' }),
+  url: Type.String({ format: 'uri', description: 'Video URL being downloaded' }),
+  name: Type.String({ description: 'Video name' }),
+  status: Type.Union([
+    Type.Literal('downloading'),
+    Type.Literal('processing')
+  ], { description: 'Current download status' }),
+  progressPercent: Type.Number({ minimum: 0, maximum: 100, description: 'Download progress percentage' }),
+  downloadedBytes: Type.Number({ minimum: 0, description: 'Bytes downloaded so far' }),
+  totalBytes: Type.Optional(Type.Number({ minimum: 0, description: 'Total file size in bytes if known' })),
+  lastUpdated: Type.String({ format: 'date-time', description: 'Last progress update timestamp' }),
+  startedAt: Type.String({ format: 'date-time', description: 'Download start timestamp' }),
+}, {
+  $id: 'DownloadProgress',
+  title: 'Download Progress',
+  description: 'Current progress information for an active download'
+});
+
+export const ProgressResponseSchema = Type.Object({
+  progress: DownloadProgressSchema,
+}, {
+  $id: 'ProgressResponse',
+  title: 'Progress Response',
+  description: 'Response containing download progress information'
+});
+
+export const AllProgressResponseSchema = Type.Object({
+  downloads: Type.Array(DownloadProgressSchema, { description: 'List of downloads in progress' }),
+}, {
+  $id: 'AllProgressResponse',
+  title: 'All Progress Response',
+  description: 'List of all downloads currently in progress'
+});
+
 export const HealthResponseSchema = Type.Object({
   status: Type.Literal('ok', { description: 'Service health status' }),
   timestamp: Type.String({ format: 'date-time', description: 'Current server timestamp' }),
@@ -70,4 +105,7 @@ export type DownloadRequest = Static<typeof DownloadRequestSchema>;
 export type DownloadResponse = Static<typeof DownloadResponseSchema>;
 export type CompletedDownload = Static<typeof CompletedDownloadSchema>;
 export type CompletedDownloadsResponse = Static<typeof CompletedDownloadsResponseSchema>;
+export type DownloadProgress = Static<typeof DownloadProgressSchema>;
+export type ProgressResponse = Static<typeof ProgressResponseSchema>;
+export type AllProgressResponse = Static<typeof AllProgressResponseSchema>;
 export type HealthResponse = Static<typeof HealthResponseSchema>;

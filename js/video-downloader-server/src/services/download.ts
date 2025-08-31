@@ -1,8 +1,8 @@
-import type { CompletedDownload } from '../schemas.js';
+import type { CompletedDownload, DownloadProgress } from '../schemas.js';
 import fs from 'fs';
 import path from 'path';
 import { pipeline } from 'stream/promises';
-import { Readable } from 'stream';
+import { Readable, Transform } from 'stream';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
 import { EventEmitter } from 'events';
 import type { FastifyBaseLogger } from 'fastify';
@@ -22,7 +22,7 @@ export interface DownloadJob {
 }
 
 interface Downloader {
-  download(jobId: string, url: string, name: string): Promise<CompletedDownload>;
+  download(jobId: string, url: string, name: string, progressCallback?: (progress: DownloadProgress) => void): Promise<CompletedDownload>;
 }
 
 class SxyPrnDownloader implements Downloader {
@@ -32,7 +32,7 @@ class SxyPrnDownloader implements Downloader {
     this.logger = logger;
   }
 
-  async download(jobId: string, url: string, name: string): Promise<CompletedDownload> {
+  async download(jobId: string, url: string, name: string, progressCallback?: (progress: DownloadProgress) => void): Promise<CompletedDownload> {
     const jobLogger = this.logger.child({ jobId, url, name });
     jobLogger.info('Starting video download from SxyPrn');
     
@@ -61,7 +61,7 @@ class SxyPrnDownloader implements Downloader {
       
       const startedAt = new Date();
       jobLogger.info({ canonicalUrl, outputPath }, 'Starting video file download');
-      const size = await this.downloadVideo(canonicalUrl, outputPath);
+      const size = await this.downloadVideo(jobId, url, name, canonicalUrl, outputPath, progressCallback, jobLogger);
       const finishedAt = new Date();
       
       const downloadDuration = finishedAt.getTime() - startedAt.getTime();
@@ -104,23 +104,84 @@ class SxyPrnDownloader implements Downloader {
     }
   }
   
-  private async downloadVideo(url: string, outputPath: string): Promise<number> {
+  private async downloadVideo(
+    jobId: string, 
+    jobUrl: string, 
+    name: string, 
+    videoUrl: string, 
+    outputPath: string, 
+    progressCallback?: (progress: DownloadProgress) => void,
+    jobLogger?: FastifyBaseLogger
+  ): Promise<number> {
     try {
-      const response = await fetch(url);
+      const response = await fetch(videoUrl);
       if (!response.ok) {
         throw new NetworkError(`Failed to fetch video: ${response.status} ${response.statusText}`, {
-          url,
+          url: videoUrl,
           status: response.status,
           statusText: response.statusText
         });
       }
       
       if (!response.body) {
-        throw new NetworkError('Response body is empty', { url });
+        throw new NetworkError('Response body is empty', { url: videoUrl });
       }
+
+      const contentLength = response.headers.get('content-length');
+      const totalBytes = contentLength ? parseInt(contentLength, 10) : undefined;
+      
+      let downloadedBytes = 0;
+      let lastProgressPercent = 0;
+      const startedAt = new Date();
+
+      // Create progress tracking transform stream
+      const progressTracker = new Transform({
+        transform(chunk, encoding, callback) {
+          downloadedBytes += chunk.length;
+          
+          if (progressCallback && totalBytes) {
+            const progressPercent = Math.floor((downloadedBytes / totalBytes) * 100);
+            
+            // Only emit progress every 5% and at completion
+            if (progressPercent >= lastProgressPercent + 5 || progressPercent === 100) {
+              const progress: DownloadProgress = {
+                jobId,
+                url: jobUrl,
+                name,
+                status: 'downloading',
+                progressPercent,
+                downloadedBytes,
+                totalBytes,
+                lastUpdated: new Date().toISOString(),
+                startedAt: startedAt.toISOString()
+              };
+              
+              progressCallback(progress);
+              
+              if (jobLogger && progressPercent >= lastProgressPercent + 5) {
+                jobLogger.info({
+                  jobId,
+                  progressPercent,
+                  downloadedBytes,
+                  totalBytes
+                }, `Download progress: ${progressPercent}%`);
+              }
+              
+              lastProgressPercent = progressPercent;
+            }
+          }
+          
+          callback(null, chunk);
+        }
+      });
       
       const writeStream = fs.createWriteStream(outputPath);
-      await pipeline(Readable.fromWeb(response.body as NodeReadableStream), writeStream);
+      
+      await pipeline(
+        Readable.fromWeb(response.body as NodeReadableStream),
+        progressTracker,
+        writeStream
+      );
       
       const stats = await fs.promises.stat(outputPath);
       return stats.size;
@@ -129,7 +190,7 @@ class SxyPrnDownloader implements Downloader {
         throw error;
       }
       throw new DownloadFailedError('Failed to download and save video file', {
-        url,
+        url: videoUrl,
         outputPath,
         originalError: error instanceof Error ? error.message : String(error)
       });
@@ -140,6 +201,7 @@ class SxyPrnDownloader implements Downloader {
 export class DownloadService extends EventEmitter {
   private queue: DownloadJob[] = [];
   private completed: CompletedDownload[] = [];
+  private inProgress: Map<string, DownloadProgress> = new Map();
   private sxyPrnDownloader: SxyPrnDownloader;
   private logger: FastifyBaseLogger;
 
@@ -175,6 +237,14 @@ export class DownloadService extends EventEmitter {
     return [...this.completed];
   }
 
+  getProgress(jobId: string): DownloadProgress | undefined {
+    return this.inProgress.get(jobId);
+  }
+
+  getAllProgress(): DownloadProgress[] {
+    return Array.from(this.inProgress.values());
+  }
+
   private generateJobId(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
@@ -205,6 +275,21 @@ export class DownloadService extends EventEmitter {
   private async processJob(job: DownloadJob): Promise<void> {
     const startTime = Date.now();
     
+    // Initialize progress tracking
+    const initialProgress: DownloadProgress = {
+      jobId: job.jobId,
+      url: job.url,
+      name: job.name,
+      status: 'processing',
+      progressPercent: 0,
+      downloadedBytes: 0,
+      totalBytes: undefined,
+      lastUpdated: new Date().toISOString(),
+      startedAt: new Date().toISOString()
+    };
+    
+    this.inProgress.set(job.jobId, initialProgress);
+    
     this.logger.info({
       jobId: job.jobId,
       url: job.url,
@@ -212,6 +297,11 @@ export class DownloadService extends EventEmitter {
       enqueuedAt: job.enqueuedAt,
       waitTime: startTime - job.enqueuedAt.getTime()
     }, 'Starting download job processing');
+    
+    // Progress callback to update the progress map
+    const progressCallback = (progress: DownloadProgress) => {
+      this.inProgress.set(job.jobId, progress);
+    };
     
     try {
       const urlObj = new URL(job.url);
@@ -223,8 +313,11 @@ export class DownloadService extends EventEmitter {
         throw new UnsupportedUrlError(`URL hostname not supported: ${urlObj.hostname}`);
       }
       
-      const result = await downloader.download(job.jobId, job.url, job.name);
+      const result = await downloader.download(job.jobId, job.url, job.name, progressCallback);
       this.completed.push(result);
+      
+      // Remove from in-progress tracking
+      this.inProgress.delete(job.jobId);
       
       const endTime = Date.now();
       const processingTime = endTime - startTime;
@@ -241,6 +334,9 @@ export class DownloadService extends EventEmitter {
       }, 'Download job completed successfully');
       
     } catch (error) {
+      // Remove from in-progress tracking on failure
+      this.inProgress.delete(job.jobId);
+      
       const endTime = Date.now();
       const processingTime = endTime - startTime;
       

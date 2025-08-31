@@ -5,12 +5,16 @@ import {
 	DownloadRequestSchema,
 	DownloadResponseSchema,
 	CompletedDownloadsResponseSchema,
+	ProgressResponseSchema,
+	AllProgressResponseSchema,
 	HealthResponseSchema,
 	type NameRequest,
 	type NameResponse,
 	type DownloadRequest,
 	type DownloadResponse,
 	type CompletedDownloadsResponse,
+	type ProgressResponse,
+	type AllProgressResponse,
 	type HealthResponse,
 } from './schemas.js';
 import { DefaultNameResolver } from './services/name.js';
@@ -70,6 +74,55 @@ export async function registerRoutes(fastify: FastifyInstance) {
 		},
 	}, async (request, reply) => {
 		const downloads = downloadService.getCompleted();
+		return { downloads };
+	});
+
+	fastify.get<{
+		Params: { jobId: string };
+	}>('/v1/downloads/progress/:jobId', {
+		schema: {
+			tags: ['Downloads'],
+			summary: 'Get download progress',
+			description: 'Retrieve progress information for a specific download job',
+			params: {
+				type: 'object',
+				properties: {
+					jobId: { type: 'string', description: 'Job ID to get progress for' }
+				},
+				required: ['jobId']
+			},
+			response: {
+				200: ProgressResponseSchema,
+				404: {
+					type: 'object',
+					properties: {
+						error: { type: 'string' }
+					}
+				}
+			},
+		},
+	}, async (request, reply) => {
+		const progress = downloadService.getProgress(request.params.jobId);
+		if (!progress) {
+			reply.code(404);
+			return { error: 'Download job not found or not in progress' };
+		}
+		return { progress };
+	});
+
+	fastify.get<{
+		Reply: AllProgressResponse;
+	}>('/v1/downloads/progress', {
+		schema: {
+			tags: ['Downloads'],
+			summary: 'Get all download progress',
+			description: 'Retrieve progress information for all downloads currently in progress',
+			response: {
+				200: AllProgressResponseSchema,
+			},
+		},
+	}, async (request, reply) => {
+		const downloads = downloadService.getAllProgress();
 		return { downloads };
 	});
 
