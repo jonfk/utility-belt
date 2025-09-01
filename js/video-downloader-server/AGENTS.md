@@ -7,7 +7,7 @@ This is a simple utility service, therefore dependencies, code and implementatio
 - `src/`: TypeScript source
   - `server.ts`: Fastify boot + shutdown
   - `routes.ts`: API routes (`/v1/*`, `/healthz`)
-  - `schemas.ts`: TypeBox schemas + TS types
+  - `schemas.ts`: TypeBox validation schemas + TS types
   - `services/`: `download.ts` (queue + downloader), `name.ts` (name resolver)
   - Infra: `puppeteer.ts`, `storage.ts`, `config.ts`, `error-handler.ts`, `errors.ts`
 - `dist/`: Transpiled JS output (created by `tsc`)
@@ -24,6 +24,11 @@ This is a simple utility service, therefore dependencies, code and implementatio
   - Run: `just docker-run` or `docker run -p 3000:3000 video-downloader-server`
 
 Note: `npm test` is a placeholder and currently exits non‑zero (no tests yet).
+
+## API Validation & Documentation
+- TypeBox schemas in `schemas.ts` validate all API requests/responses
+- Fastify auto-validates using schema definitions in route handlers
+- Swagger/OpenAPI docs auto-generated at `/docs` from TypeBox schemas
 
 ## Coding Style & Naming Conventions
 - Language: TypeScript (strict), ESNext modules.
