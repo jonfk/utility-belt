@@ -26,7 +26,7 @@ export async function registerRoutes(fastify: FastifyInstance) {
 	fastify.post<{
 		Body: NameRequest;
 		Reply: NameResponse;
-	}>('/v1/name', {
+	}>('/api/name', {
 		schema: {
 			tags: ['Video'],
 			summary: 'Resolve video name',
@@ -45,7 +45,7 @@ export async function registerRoutes(fastify: FastifyInstance) {
 	fastify.post<{
 		Body: DownloadRequest;
 		Reply: DownloadResponse;
-	}>('/v1/download', {
+	}>('/api/download', {
 		schema: {
 			tags: ['Video'],
 			summary: 'Enqueue video download',
@@ -63,7 +63,7 @@ export async function registerRoutes(fastify: FastifyInstance) {
 
 	fastify.get<{
 		Reply: CompletedDownloadsResponse;
-	}>('/v1/downloads/completed', {
+	}>('/api/downloads/completed', {
 		schema: {
 			tags: ['Downloads'],
 			summary: 'Get completed downloads',
@@ -79,7 +79,7 @@ export async function registerRoutes(fastify: FastifyInstance) {
 
 	fastify.get<{
 		Params: { jobId: string };
-	}>('/v1/downloads/progress/:jobId', {
+	}>('/api/downloads/progress/:jobId', {
 		schema: {
 			tags: ['Downloads'],
 			summary: 'Get download progress',
@@ -112,7 +112,7 @@ export async function registerRoutes(fastify: FastifyInstance) {
 
 	fastify.get<{
 		Reply: AllProgressResponse;
-	}>('/v1/downloads/progress', {
+	}>('/api/downloads/progress', {
 		schema: {
 			tags: ['Downloads'],
 			summary: 'Get all download progress',
