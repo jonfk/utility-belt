@@ -3,11 +3,17 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import sensible from '@fastify/sensible';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import staticPlugin from '@fastify/static';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { registerRoutes } from './routes.js';
 import { ensureDataDir } from './storage.js';
 import { closeBrowser } from './puppeteer.js';
 import { registerErrorHandler } from './error-handler.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const fastify = Fastify({
   logger: true,
@@ -17,6 +23,11 @@ async function start() {
   try {
     await fastify.register(sensible);
     await registerErrorHandler(fastify);
+
+    await fastify.register(staticPlugin, {
+      root: path.join(__dirname, '..', 'public'),
+      prefix: '/',
+    });
 
     await fastify.register(swagger, {
       openapi: {
