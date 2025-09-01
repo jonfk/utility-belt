@@ -1,0 +1,5 @@
+- [ ] Improve the UI by using basecoatui as the framework for components
+- [ ] Add destination directory for download to API and UI
+- [ ] Add the concept of "save" directories, which are directories that are blessed as destination directories. That would allow easy searching and selecting of those directories as the destination directory for download
+    - Brainstorm a better name than "save" directory
+- [ ] Improve the UX of resolving the name from a path and downloading it. This could be done automatically with a pseudo wizard that starts with the name resolution and once a name is chosen, it advances to directory selection and then to confirming the download.

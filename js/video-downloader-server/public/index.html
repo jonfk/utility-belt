@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Downloader</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+  <div x-data="videoDownloader()" x-init="init()" class="container">
+    <header>
+      <h1>Video Downloader</h1>
+      <p>Simple utility for downloading videos from URLs</p>
+    </header>
+
+    <div class="section">
+      <h2>1. Resolve Video Name</h2>
+      <form @submit.prevent="resolveName()" class="form">
+        <div class="input-group">
+          <input 
+            type="url" 
+            x-model="nameForm.url" 
+            placeholder="Enter video URL..." 
+            required
+            :disabled="nameForm.loading"
+          >
+          <button type="submit" :disabled="nameForm.loading || !nameForm.url">
+            <span x-show="!nameForm.loading">Resolve Name</span>
+            <span x-show="nameForm.loading">Loading...</span>
+          </button>
+        </div>
+        <div x-show="nameForm.error" class="error" x-text="nameForm.error"></div>
+        <div x-show="nameForm.result" class="success">
+          <strong>Resolved name:</strong> <span x-text="nameForm.result"></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="section">
+      <h2>2. Start Download</h2>
+      <form @submit.prevent="startDownload()" class="form">
+        <div class="input-group">
+          <input 
+            type="url" 
+            x-model="downloadForm.url" 
+            placeholder="Video URL..." 
+            required
+            :disabled="downloadForm.loading"
+          >
+        </div>
+        <div class="input-group">
+          <input 
+            type="text" 
+            x-model="downloadForm.name" 
+            placeholder="Video name..." 
+            required
+            :disabled="downloadForm.loading"
+          >
+          <button 
+            type="button" 
+            @click="copyFromResolve()" 
+            :disabled="!nameForm.result"
+            class="secondary"
+          >
+            Use Resolved Name
+          </button>
+        </div>
+        <button type="submit" :disabled="downloadForm.loading || !downloadForm.url || !downloadForm.name">
+          <span x-show="!downloadForm.loading">Start Download</span>
+          <span x-show="downloadForm.loading">Starting...</span>
+        </button>
+        <div x-show="downloadForm.error" class="error" x-text="downloadForm.error"></div>
+        <div x-show="downloadForm.success" class="success" x-text="downloadForm.success"></div>
+      </form>
+    </div>
+
+    <div class="section">
+      <h2>3. Active Downloads</h2>
+      <div x-show="activeDownloads.length === 0" class="empty">
+        No downloads in progress
+      </div>
+      <template x-for="download in activeDownloads" :key="download.jobId">
+        <div class="download-item active">
+          <div class="download-header">
+            <strong x-text="download.name"></strong>
+            <span class="status" x-text="download.status"></span>
+          </div>
+          <div class="download-url" x-text="download.url"></div>
+          <div class="progress-container">
+            <div class="progress-bar">
+              <div class="progress-fill" :style="`width: ${download.progressPercent}%`"></div>
+            </div>
+            <div class="progress-text">
+              <span x-text="`${download.progressPercent}%`"></span>
+              <span x-show="download.downloadedBytes && download.totalBytes">
+                (<span x-text="formatBytes(download.downloadedBytes)"></span> / 
+                <span x-text="formatBytes(download.totalBytes)"></span>)
+              </span>
+              <span x-show="download.downloadedBytes && !download.totalBytes">
+                (<span x-text="formatBytes(download.downloadedBytes)"></span> downloaded)
+              </span>
+            </div>
+          </div>
+          <div class="download-meta">
+            <small>Started: <span x-text="formatDate(download.startedAt)"></span></small>
+            <small>Updated: <span x-text="formatDate(download.lastUpdated)"></span></small>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div class="section">
+      <h2>4. Completed Downloads</h2>
+      <div class="controls">
+        <button @click="loadCompleted()" :disabled="completedLoading">
+          <span x-show="!completedLoading">Refresh</span>
+          <span x-show="completedLoading">Loading...</span>
+        </button>
+      </div>
+      <div x-show="completedDownloads.length === 0 && !completedLoading" class="empty">
+        No completed downloads
+      </div>
+      <template x-for="download in completedDownloads" :key="`${download.url}-${download.finishedAt}`">
+        <div class="download-item completed">
+          <div class="download-header">
+            <strong x-text="download.name"></strong>
+            <span class="status">Completed</span>
+          </div>
+          <div class="download-url" x-text="download.url"></div>
+          <div class="download-meta">
+            <small>Size: <span x-text="formatBytes(download.size)"></span></small>
+            <small>Started: <span x-text="formatDate(download.startedAt)"></span></small>
+            <small>Finished: <span x-text="formatDate(download.finishedAt)"></span></small>
+            <small>Path: <span x-text="download.savedPath"></span></small>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -6,31 +6,36 @@ Here’s a simple, stable, TypeScript + Fastify design that keeps moving parts t
 - Stability over time: use JSON Schema for request/response validation (native Fastify path) with TypeBox for TS types, so types and validation stay in sync.
 - Predictable headless runtime: stick to Puppeteer’s bundled “Chrome for Testing” for API compatibility over time.
 - Sequential downloads: maintain an in-memory FIFO queue; process one job at a time.
+- Async API: `POST /v1/download` enqueues and returns immediately with a `jobId`.
 
 ## High-Level Architecture
 
 ### Layers
 1. HTTP API (Fastify) — routing + validation
 2. Services
-   - NameResolver (interface): given a URL → returns a name (implementation pluggable)
-   - Downloader (service): given `{ url, name }` → drives Puppeteer to download into a target folder
-3. Infrastructure
-   - PuppeteerManager: singleton owning one Browser, creates/cleans Page per job, handles graceful shutdown
-   - Storage: safe file/path handling under a configured `DATA_DIR`
-   - JobQueue (sequential): in-memory FIFO queue with a single worker that runs one download at a time
-   - CompletedStore: in-memory list of completed downloads (for a simple read API)
+   - `services/name.ts`: NameResolver (split out, swappable)
+   - `services/download.ts`: tiny FIFO queue + in-memory completed list + per-domain downloader dispatch
+3. Infrastructure (flattened files)
+   - `puppeteer.ts`: singleton Browser + helpers
+   - `storage.ts`: `DATA_DIR`, path safety, fs ops
+   - `config.ts`: env + defaults
+
+Per-domain strategies
+- Resolver selection: pick a `NameResolver` based on URL/hostname pattern (e.g., YouTube-specific rules).
+- Downloader selection: pick a downloader implementation per URL/hostname; an implementation may use Puppeteer or a non-Puppeteer approach.
 
 ### Endpoints (v1)
-- POST `/v1/name` — body `{ url }` → `{ name }`
-- POST `/v1/download` — body `{ url, name }` → `{ savedPath, size, startedAt, finishedAt }`
+- POST `/v1/name` — body `{ url }` → `{ name }` (resolver chosen by URL/domain)
+- POST `/v1/download` — body `{ url, name }` → `{ jobId, status: "enqueued" }`
 - GET `/v1/downloads/completed` — list completed downloads kept in memory
 - GET `/healthz` — readiness/liveness
 
 ## Why This Way
 
 - Fastify + JSON Schema: fast validation and stable contracts.
-- One reused browser instance, new page per task: lower memory and fewer crashes than per-request launches; cap parallel pages.
-- Encapsulation via plugins keeps the app small and easy to reason about.
+- Async enqueue keeps requests fast; a single-worker queue ensures predictable resource use.
+- One reused browser instance for strategies that need it; decoupled so other strategies can skip Puppeteer entirely.
+- Encapsulation via small modules keeps the app small and easy to reason about.
 
 ## API Schemas
 
@@ -53,10 +58,8 @@ Use TypeBox for schemas and types (Fastify’s docs recommend it):
   - Response
     ```json
     {
-      "savedPath": "data/my-file.ext",
-      "size": 123456,
-      "startedAt": "2024-01-01T00:00:00.000Z",
-      "finishedAt": "2024-01-01T00:00:05.000Z"
+      "jobId": "a1b2c3d4",
+      "status": "enqueued"
     }
     ```
 
@@ -79,11 +82,22 @@ Fastify’s TypeScript guide shows how to wire TypeBox so the same schema powers
 
 See https://fastify.dev/docs/latest/Reference/Type-Providers/#typebox
 
-## Puppeteer Strategy
+- Error schemas: 4xx/5xx responses should reference the shared error schema installed by `@fastify/sensible` (e.g., `{ $ref: 'HttpError' }`) to keep error payloads consistent across routes.
 
-- Lifecycle: create one Browser on startup, reuse it; create a new Page per request, close it after. Keeps memory predictable.
+## Errors & Error Handling
 
-Why reuse the browser? Lower cold-start latency and memory churn; widely recommended to reuse a single browser and limit parallel pages.
+- One root handler: register `setErrorHandler` once (in `src/error-handler.ts`) during app boot. Fastify error handlers are encapsulated per plugin—keep a single root error handler on the root instance for consistent behavior.
+- 404s separately: use `setNotFoundHandler` for unknown routes; these do not pass through the standard error handler.
+- Validation errors: Fastify sets `error.statusCode = 400` for validation failures. The handler should echo that status and format the body; no special-case logic needed beyond checking `error.statusCode`.
+- Domain errors: define a tiny `AppError` in `src/errors.ts` with fields `{ code, statusCode, message, details? }` and a few specific errors (e.g., `InvalidUrlError` → 400, `NameResolutionError` → 422, `QueueFullError` → 429, `DownloadFailedError` → 502/504). Services throw these; the handler maps them to HTTP.
+- Unknown errors: map to 500 with a generic payload; never leak stack traces by default.
+- Use `@fastify/sensible`: register it to get `httpErrors` helpers and (optionally) install a shared JSON Schema for error responses via `sharedSchemaId: 'HttpError'`.
+
+## Puppeteer Infra
+
+- Lifecycle: create one Browser on startup, reuse it; strategies that use Puppeteer create a Page per job and close it after. Keeps memory predictable.
+
+Why reuse the browser? Lower cold-start latency and memory churn. Not all downloaders need Puppeteer—some may use HTTP or other methods.
 
 ## Graceful Startup & Shutdown
 
@@ -100,9 +114,7 @@ Why reuse the browser? Lower cold-start latency and memory churn; widely recomme
 
 - `PORT` (default 3000)
 - `DATA_DIR` (where files land; default `./data`)
-- No `CONCURRENCY`: downloads run strictly sequentially via the in-memory queue
 - `REQUEST_TIMEOUT_MS` (Fastify + Puppeteer job timeout)
-- `ALLOWED_HOSTS` (comma-separated allowlist)
 - `HEADLESS=true|false` (Puppeteer launch flag; default headless)
 
 Puppeteer pins a compatible Chrome build at install time, aiding long-term stability; keep Node at LTS and avoid bleeding-edge flags.
@@ -110,29 +122,18 @@ Puppeteer pins a compatible Chrome build at install time, aiding long-term stabi
 ## Minimal Project Structure
 
 ```
-fastify-puppeteer-downloader/
-├─ src/
-│  ├─ app.ts                 # build Fastify instance (register routes/plugins)
-│  ├─ server.ts              # boot: create app, start listen, wire signals
-│  ├─ routes/
-│  │  ├─ name.routes.ts      # POST /v1/name
-│  │  └─ download.routes.ts  # POST /v1/download
-│  ├─ services/
-│  │  ├─ NameResolver.ts     # interface + default stub
-│  │  └─ Downloader.ts       # uses PuppeteerManager + Storage
-│  ├─ infra/
-│  │  ├─ PuppeteerManager.ts # singleton Browser, page factory, shutdown
-│  │  ├─ Storage.ts          # safe filename/path utils, fs ops
-│  │  ├─ JobQueue.ts         # sequential in-memory FIFO queue, single worker
-│  │  └─ CompletedStore.ts   # in-memory list of completed download records
-│  ├─ schemas/
-│  │  ├─ name.ts             # TypeBox schemas (req/res)
-│  │  └─ download.ts
-│  └─ config.ts              # env parsing (with defaults)
-├─ data/                     # download root (gitignored)
-├─ test/                     # unit + light integration tests
-├─ package.json
-└─ tsconfig.json
+src/
+├─ server.ts          # boot & shutdown
+├─ routes.ts          # registers endpoints
+├─ schemas.ts         # TypeBox schemas
+├─ puppeteer.ts       # singleton Browser + helpers
+├─ storage.ts         # DATA_DIR, path safety, fs ops
+├─ config.ts          # env + defaults
+├─ error-handler.ts   # single root error handler plugin (register at boot)
+├─ errors.ts          # AppError base + small set of domain errors
+└─ services/
+   ├─ name.ts         # NameResolver (split out)
+   └─ download.ts     # tiny FIFO queue + completed list + strategy dispatch
 ```
 
 ## Runtime Notes & Best Practices
@@ -140,17 +141,20 @@ fastify-puppeteer-downloader/
 - Validation: JSON Schema + TypeBox (officially recommended pattern) keeps you fast and typed.
 - Utilities: `@fastify/sensible` gives small helpers (e.g., `httpErrors`) without bloating code.
 - Ecosystem: if you later want OpenAPI or graceful exit helpers, the Fastify ecosystem has drop-in plugins—optional for now to keep things simple.
+- Register order: register `error-handler.ts` and `setNotFoundHandler` on the root Fastify instance to avoid per-plugin divergence due to encapsulation.
+- Error shape: standardize error JSON as `{ code, message, statusCode, details? }`. Validation errors keep Fastify’s `400`; domain errors use their declared `statusCode`; unknowns become `500`.
 
 ## Download Flow (Implementation Sketch)
 
-1. `Downloader.download({ url, name })`
-   - Validate `url` against allowlist and scheme; normalize `name` and ensure the final path is within `DATA_DIR` (SSRF and traversal safeguards).
-   - Enqueue the job into `JobQueue`; only one job runs at a time. The request handler awaits the job’s completion, preserving the existing synchronous API shape.
-   - Get browser from `PuppeteerManager`, then `const page = await browser.newPage()`.
-   - Configure download directory via CDP (`Browser.setDownloadBehavior` when available; otherwise `Page.setDownloadBehavior` via `CDPSession`), trigger the click/navigation that starts the download; wait until completion (CDP event or directory polling).
-   - Close the page, resolve the job, update `CompletedStore`, return `{ savedPath, size, startedAt, finishedAt }`.
+1. Route handler enqueues and returns
+   - `POST /v1/download` validates input, enqueues a job, and returns `{ jobId, status: "enqueued" }` immediately.
+2. Worker processes jobs sequentially
+   - Validate `url`; ensure `name` maps to a safe path under `DATA_DIR`.
+   - Resolve strategy by URL/hostname: pick the appropriate downloader implementation.
+   - Run the downloader implementation; it may use `puppeteer.ts` or perform non-Puppeteer work as needed.
+   - On success, append a record to the completed list `{ url, name, savedPath, size, startedAt, finishedAt }`.
 
 ## Job Queue & Completed List
 
-- JobQueue: a tiny in-memory FIFO with a single worker; each `enqueue(fn)` chains onto a promise and runs only after the previous job resolves. If the process restarts, the queue is naturally empty.
-- CompletedStore: append-only list in memory capturing `{ url, name, savedPath, size, startedAt, finishedAt }` for successful jobs. Exposed via `GET /v1/downloads/completed`.
+- Queue: implemented locally in `services/download.ts` by chaining promises; only one job runs at a time. If the process restarts, the queue is empty.
+- Completed list: in-memory array in `services/download.ts` capturing `{ url, name, savedPath, size, startedAt, finishedAt }`. Exposed via `GET /v1/downloads/completed`.
