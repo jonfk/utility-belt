@@ -31,10 +31,6 @@ def main(
         Optional[str],
         typer.Option("-m", "--model", help="LLM model to use")
     ] = None,
-    edit: Annotated[
-        bool,
-        typer.Option("--edit/--no-edit", help="Open editor for commit message")
-    ] = True,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Show plan without making changes")
@@ -76,7 +72,7 @@ def main(
         if arg in {"-m", "--model"}:
             skip_next = True
             continue
-        if arg in {"--edit", "--no-edit", "--dry-run", "--verbose", "-v"}:
+        if arg in {"--dry-run", "--verbose", "-v"}:
             continue
 
         # This is a positional arg (part of additional prompt)
@@ -96,7 +92,6 @@ def main(
         model=model_to_use,
         extra_prompt=additional_prompt,
         llm_flags=all_llm_flags,
-        edit=edit,
         dry_run=dry_run,
         verbose=verbose,
     )

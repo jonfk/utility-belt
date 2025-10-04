@@ -106,28 +106,23 @@ def write_temp_commit(message: str, body: list[str]) -> str:
         raise
 
 
-def commit_with_editor(template: str) -> None:
-    """Commit using git's editor with a template file."""
-    _run_git("commit", "--edit", f"--template={template}", capture_output=False)
+def commit(message: str, body: list[str] | None = None, edit: bool = False) -> None:
+    """Create a commit with the given message and optional body.
 
+    Args:
+        message: The commit message (first line)
+        body: Optional additional lines for the commit body
+        edit: If True, opens the editor for editing the message
 
-def commit_with_file(file_path: str) -> None:
-    """Commit using a message from a file."""
-    _run_git("commit", "-F", file_path, capture_output=False)
-
-
-def commit_single_line(message: str, edit: bool = False) -> None:
-    """Create a single-line commit.
-
-    If edit=True, opens the editor with the message pre-filled.
-    Otherwise, commits directly with -m.
+    The message and body are written to a temporary file, then committed.
+    If edit=True, the editor is opened. Otherwise, the commit is created directly.
     """
-    if edit:
-        # Create temp file and use --edit --template
-        temp_path = write_temp_commit(message, [])
-        try:
-            commit_with_editor(temp_path)
-        finally:
-            Path(temp_path).unlink(missing_ok=True)
-    else:
-        _run_git("commit", "-m", message, capture_output=False)
+    body = body or []
+    temp_path = write_temp_commit(message, body)
+    try:
+        if edit:
+            _run_git("commit", "--edit", f"--template={temp_path}", capture_output=False)
+        else:
+            _run_git("commit", "-F", temp_path, capture_output=False)
+    finally:
+        Path(temp_path).unlink(missing_ok=True)

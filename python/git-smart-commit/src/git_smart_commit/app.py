@@ -20,7 +20,6 @@ def run(
     model: str,
     extra_prompt: str = "",
     llm_flags: Optional[list[str]] = None,
-    edit: bool = True,
     dry_run: bool = False,
     verbose: bool = False,
 ) -> None:
@@ -30,7 +29,6 @@ def run(
         model: LLM model to use
         extra_prompt: Additional user-provided prompt context
         llm_flags: Extra flags to pass to the llm command
-        edit: Whether to open editor for commit message
         dry_run: If True, show plan but don't execute
         verbose: Show verbose output including raw JSON
     """
@@ -147,29 +145,21 @@ def run(
             gitio.stage(valid_files)
             render.success(f"Staged {len(valid_files)} file(s)")
 
+        # Ask user if they want to edit the commit message
+        try:
+            response = input("Edit commit message? [y/N]: ").strip().lower()
+            edit = response in ['y', 'yes']
+        except (EOFError, KeyboardInterrupt):
+            render.info("\nAborted by user")
+            raise SystemExit(130)
+
         # Create commit
-        if plan.commit.body:
-            # Multi-line commit with editor or direct file
-            temp_path = gitio.write_temp_commit(plan.commit.message, plan.commit.body)
-            try:
-                if edit:
-                    gitio.commit_with_editor(temp_path)
-                else:
-                    gitio.commit_with_file(temp_path)
-                render.success("Commit created successfully")
-            except gitio.GitError as e:
-                # If commit fails (e.g., user aborted in editor), don't delete temp file
-                # Show them the command they can run manually
-                render.error(f"Commit failed: {e}")
-                render.info(f"You can commit manually with: git commit -F {temp_path}")
-                raise SystemExit(1)
-            finally:
-                # Clean up temp file only if commit succeeded
-                Path(temp_path).unlink(missing_ok=True)
-        else:
-            # Single-line commit
-            gitio.commit_single_line(plan.commit.message, edit=edit)
+        try:
+            gitio.commit(plan.commit.message, plan.commit.body, edit=edit)
             render.success("Commit created successfully")
+        except gitio.GitError as e:
+            render.error(f"Commit failed: {e}")
+            raise SystemExit(1)
 
     except gitio.GitError as e:
         render.error(f"Git operation failed: {e}")
