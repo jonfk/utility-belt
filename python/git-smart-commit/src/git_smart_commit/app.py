@@ -12,7 +12,7 @@ from .models import (
     parse_staged,
     parse_unstaged,
 )
-from .prompt import Context, build_prompt, read_project_guidelines
+from .prompt import Context, build_prompt, read_agent_context, read_project_guidelines
 from .llm.llm_cli import LlmCliClient
 
 
@@ -55,10 +55,12 @@ def run(
         recent_commits = ""
 
     project_guidelines = read_project_guidelines()
+    agent_context = read_agent_context()
 
     context = Context(
         recent_commits=recent_commits,
         project_guidelines=project_guidelines,
+        agent_context=agent_context,
     )
 
     # Determine what to do based on changes
