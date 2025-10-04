@@ -1,3 +1,12 @@
+- [ ] UI improvements:
+    - a spinning wheel or some other indicator to show that the llm is working
+    - A nicer prompt to the user when choosing y/n to edit. Maybe a chooser that can be selected up and down, etc
+    - A nicer way to show what model is being used than
+```
+ℹ Using model: gemini-2.5-flash
+ℹ Generating commit message for unstaged changes...
+```
+
 - [ ] Add tools support to the app. This would allow multi turn flows and allow the llm to gather additional information using the tools
     - Examples of tools to support:
         - Read
