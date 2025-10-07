@@ -83,8 +83,7 @@ SUMMARY_SCHEMA = {
                         "maxLength": 200
                     }
                 },
-                "required": ["file", "summary"],
-                "additionalProperties": False
+                "required": ["file", "summary"]
             },
             "description": "Summary of changes for each modified file"
         }
@@ -128,8 +127,7 @@ CONTEXT_SELECTION_SCHEMA = {
                         "minLength": 1
                     }
                 },
-                "required": ["commit", "file"],
-                "additionalProperties": False
+                "required": ["commit", "file"]
             },
             "description": "Specific files from specific commits that provide relevant context"
         },
