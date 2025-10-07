@@ -39,6 +39,10 @@ def main(
         bool,
         typer.Option("--verbose", "-v", help="Show verbose output including raw JSON")
     ] = False,
+    extended_context: Annotated[
+        bool,
+        typer.Option("--extended-context", "-e", help="Use extended context mode with historical analysis")
+    ] = False,
     ctx: typer.Context = typer.Context,
 ) -> None:
     """Generate intelligent git commit messages using AI.
@@ -72,7 +76,7 @@ def main(
         if arg in {"-m", "--model"}:
             skip_next = True
             continue
-        if arg in {"--dry-run", "--verbose", "-v"}:
+        if arg in {"--dry-run", "--verbose", "-v", "--extended-context", "-e"}:
             continue
 
         # This is a positional arg (part of additional prompt)
@@ -94,6 +98,7 @@ def main(
         llm_flags=all_llm_flags,
         dry_run=dry_run,
         verbose=verbose,
+        extended_context=extended_context,
     )
 
 

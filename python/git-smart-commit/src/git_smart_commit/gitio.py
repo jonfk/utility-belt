@@ -106,6 +106,60 @@ def write_temp_commit(message: str, body: list[str]) -> str:
         raise
 
 
+def log_with_stats(n: int = 20) -> str:
+    """Get recent commit history with file statistics.
+
+    Returns output similar to: git log --stat -n <n>
+    """
+    result = _run_git("log", "--stat", f"-{n}")
+    return result.stdout.strip()
+
+
+def show_commit(commit_id: str) -> str:
+    """Get full commit diff for a specific commit.
+
+    Args:
+        commit_id: The commit hash or reference
+
+    Returns:
+        Full commit diff output
+    """
+    result = _run_git("show", commit_id)
+    return result.stdout
+
+
+def get_file_at_commit(commit_id: str, file_path: str) -> str:
+    """Get the contents of a file at a specific commit.
+
+    Args:
+        commit_id: The commit hash or reference
+        file_path: Path to the file in the repository
+
+    Returns:
+        File contents at that commit
+
+    Raises:
+        GitError: If the file doesn't exist at that commit
+    """
+    result = _run_git("show", f"{commit_id}:{file_path}")
+    return result.stdout
+
+
+def get_file_size(file_path: str) -> int:
+    """Get the size of a file in bytes.
+
+    Args:
+        file_path: Path to the file
+
+    Returns:
+        File size in bytes, or 0 if file doesn't exist
+    """
+    try:
+        return Path(file_path).stat().st_size
+    except (FileNotFoundError, OSError):
+        return 0
+
+
 def commit(message: str, body: list[str] | None = None, edit: bool = False) -> None:
     """Create a commit with the given message and optional body.
 

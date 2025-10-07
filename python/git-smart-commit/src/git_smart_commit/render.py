@@ -112,3 +112,67 @@ def show_commit_preview(message: str, body: list[str]) -> None:
         for line in body:
             console.print(line)
     console.print("----------------------\n")
+
+
+def show_step(step: int, total: int, description: str) -> None:
+    """Show progress step in extended context mode.
+
+    Args:
+        step: Current step number
+        total: Total number of steps
+        description: Description of what this step does
+    """
+    console.print(f"[bold cyan]Step {step}/{total}:[/bold cyan] {description}")
+
+
+def show_extended_context(selection: dict) -> None:
+    """Display what extended context was selected.
+
+    Args:
+        selection: ContextSelectionResponse dict
+    """
+    console.print("\n[bold]Selected Context:[/bold]")
+
+    reasoning = selection.get("reasoning", "")
+    if reasoning:
+        console.print(f"[dim]Reasoning: {reasoning}[/dim]\n")
+
+    relevant_files = selection.get("relevant_files", [])
+    if relevant_files:
+        console.print("[cyan]Current files for context:[/cyan]")
+        for file in relevant_files:
+            console.print(f"  • {file}")
+
+    relevant_commits = selection.get("relevant_commits", [])
+    if relevant_commits:
+        console.print("\n[cyan]Historical commits:[/cyan]")
+        for commit in relevant_commits:
+            console.print(f"  • {commit[:12]}")
+
+    commit_files = selection.get("commit_files", [])
+    if commit_files:
+        console.print("\n[cyan]Specific files from commits:[/cyan]")
+        for cf in commit_files:
+            commit = cf.get("commit", "")[:12]
+            file = cf.get("file", "")
+            console.print(f"  • {file} @ {commit}")
+
+    if not (relevant_files or relevant_commits or commit_files):
+        console.print("[dim]No additional context selected[/dim]")
+
+    console.print()
+
+
+def show_context_size(size_bytes: int, max_bytes: int = 50 * 1024) -> None:
+    """Display context size and warn if it's large.
+
+    Args:
+        size_bytes: Size of the extended context in bytes
+        max_bytes: Maximum recommended size (default 50KB)
+    """
+    size_kb = size_bytes / 1024
+
+    if size_bytes > max_bytes:
+        warning(f"Extended context is large: {size_kb:.1f}KB (recommended: <{max_bytes/1024:.0f}KB)")
+    else:
+        info(f"Extended context size: {size_kb:.1f}KB")
