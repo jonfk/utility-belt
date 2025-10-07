@@ -1,5 +1,6 @@
 - [ ] Add README.md and AGENTS.md
-- [ ] extended context mode
+- [ ] Add verbose mode
+- [x] extended context mode
 - [ ] UI improvements:
     - a spinning wheel or some other indicator to show that the llm is working
     - A nicer prompt to the user when choosing y/n to edit. Maybe a chooser that can be selected up and down, etc
