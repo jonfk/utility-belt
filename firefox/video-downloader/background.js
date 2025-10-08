@@ -50,7 +50,12 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
         const path = new URL(abs).pathname;
         const m = path.match(/\.([a-z0-9]+)(?=$|\?)/i);
         let ext = (m && m[1].toLowerCase()) || "mp4";
-        if (ext.length > 6) ext = "mp4"; // guard against weird query-only endings
+
+        // Whitelist of recognized video extensions
+        const validExts = ["mp4", "webm", "mov", "avi", "mkv", "flv", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp", "ts", "m3u8"];
+        if (ext.length > 6 || !validExts.includes(ext)) {
+          ext = "mp4"; // force to mp4 if unrecognized or too long
+        }
 
         const base = sanitize(document.title);
         const filename = `${base}.${ext}`;
