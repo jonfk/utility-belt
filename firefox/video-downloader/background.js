@@ -22,7 +22,7 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
             .replace(/[\\\/:*?"<>|]+/g, " ")
             .replace(/\s+/g, " ")
             .trim()
-            .slice(0, 120) || "video";
+            .slice(0, 180) || "video";
 
         // Find #player_el (it might be the <video> itself or a container)
         const root = document.querySelector("#player_el");
