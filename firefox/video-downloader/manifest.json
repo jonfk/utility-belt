@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "video-downloader-ext",
+  "version": "1.0.0",
+  "permissions": [
+    "contextMenus",
+    "downloads",
+    "scripting",
+    "activeTab",
+    "cookies"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  }
+}
