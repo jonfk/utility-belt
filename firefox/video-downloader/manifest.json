@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "video-downloader-ext",
   "version": "1.0.0",
+  "description": "Download videos from web pages while preserving authentication cookies",
   "permissions": [
     "contextMenus",
     "downloads",
@@ -11,5 +12,8 @@
   ],
   "background": {
     "scripts": ["background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": { "id": "video-downloader@example.com" }
   }
 }

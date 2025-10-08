@@ -87,17 +87,32 @@ The extension will be loaded temporarily and will remain active until Firefox is
 
 ### Permanent Installation (Self-Hosted)
 
-#### Option 1: Firefox Developer Edition or Nightly (Unsigned)
+#### Option 1: Firefox Developer Edition, Nightly, or ESR (Unsigned)
 
-1. Build the extension: `make build`
-2. Open Firefox Developer Edition or Nightly
-3. Navigate to `about:config`
-4. Set `xpinstall.signatures.required` to `false`
-5. Navigate to `about:addons`
-6. Click the gear icon and select "Install Add-on From File"
-7. Select the `.xpi` file from `web-ext-artifacts/`
+Short answer: you can install your own add-on permanently without publishing or signing as long as you (1) add an explicit add-on ID and (2) disable signature enforcement.
 
-**Note**: Regular Firefox releases require signed extensions and won't allow this option.
+**Do this once**
+
+1. Add an ID to your manifest:
+
+   ```json
+   "browser_specific_settings": {
+     "gecko": { "id": "video-downloader@example.com" }
+   }
+   ```
+
+   Firefox requires an explicit ID for unsigned permanent installs.
+2. Disable signature checks (Developer Edition, Nightly, or ESR only): open `about:config` and set `xpinstall.signatures.required` to `false`.
+
+**Then install your build**
+
+- Run `make build` (or otherwise zip the extension), then in Firefox open `about:addons` → gear menu → "Install Add-on From File…" and choose the `.xpi` from `web-ext-artifacts/`. Because it has an ID and signature checks are disabled, the install persists across restarts.
+
+**Notes & gotchas**
+
+- This unsigned-permanent path works only on Developer Edition, Nightly, and ESR. Release and Beta builds always require signed add-ons (or you must use AMO's unlisted/self-distribution signing).
+- If the install is still blocked, confirm the manifest includes the ID and that `xpinstall.signatures.required` is set to `false`.
+- For security, keep signature enforcement disabled only on a trusted development profile. Release/Beta builds do not allow disabling it.
 
 #### Option 2: Load Unpacked (No Build Required)
 
