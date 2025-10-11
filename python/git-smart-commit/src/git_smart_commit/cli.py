@@ -31,6 +31,10 @@ def main(
         Optional[str],
         typer.Option("-m", "--model", help="LLM model to use")
     ] = None,
+    prompt_text: Annotated[
+        Optional[str],
+        typer.Option("-p", "--prompt", help="Extra prompt context to prepend before generated instructions")
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Show plan without making changes")
@@ -48,6 +52,7 @@ def main(
     """Generate intelligent git commit messages using AI.
 
     Additional text before -- is used as extra prompt context.
+    You can also pass extra context via --prompt / -p.
     Arguments after -- are passed to the llm command.
 
     Examples:
@@ -55,6 +60,8 @@ def main(
         git-smart-commit
 
         git-smart-commit -m claude-3-5-sonnet-20240307
+
+        git-smart-commit --prompt "follow conventional commits"
 
         git-smart-commit focus on security fixes -- --temperature 0.7
     """
@@ -78,11 +85,22 @@ def main(
             continue
         if arg in {"--dry-run", "--verbose", "-v", "--extended-context", "-e"}:
             continue
+        if arg in {"-p", "--prompt"}:
+            skip_next = True
+            continue
 
         # This is a positional arg (part of additional prompt)
         additional_prompt_parts.append(arg)
 
     additional_prompt = " ".join(additional_prompt_parts)
+
+    prompt_segments: list[str] = []
+    if prompt_text:
+        prompt_segments.append(prompt_text.strip())
+    if additional_prompt:
+        prompt_segments.append(additional_prompt)
+
+    combined_prompt = " ".join(segment for segment in prompt_segments if segment)
 
     # Get model from args, env, or default
     model_to_use = model or config.get_default_model()
@@ -94,7 +112,7 @@ def main(
     # Run the application
     run(
         model=model_to_use,
-        extra_prompt=additional_prompt,
+        extra_prompt=combined_prompt,
         llm_flags=all_llm_flags,
         dry_run=dry_run,
         verbose=verbose,
