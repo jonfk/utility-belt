@@ -14,7 +14,10 @@ from typing import Dict, Iterable, List, Optional, Sequence
 import typer
 
 
-app = typer.Typer(add_completion=False)
+app = typer.Typer(
+    add_completion=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 HTTP_METHODS: Sequence[str] = (
     "get",
@@ -129,7 +132,14 @@ def _format_display(method: str, path: str, operation_id: Optional[str], summary
 def select_operations_interactively(entries: List[OperationEntry]) -> List[OperationEntry]:
     selection_input = "\n".join(entry.display for entry in entries)
     result = subprocess.run(
-        ["fzf", "--multi", "--prompt", "Select operations> "],
+        [
+            "fzf",
+            "--multi",
+            "--prompt",
+            "Select operations> ",
+            "--header",
+            "Press TAB to toggle selections; ENTER to confirm.",
+        ],
         input=selection_input,
         text=True,
         capture_output=True,
@@ -279,9 +289,20 @@ def main(
         "--operations",
         help="OperationId to prune (repeatable). Skips fzf when provided.",
     ),
-    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose logging.",
+    ),
 ) -> None:
-    """Prune an OpenAPI specification down to selected operations."""
+    """Prune an OpenAPI specification down to selected operations.
+
+    The CLI shells out to `fzf` for interactive selection when no `--operations`
+    are provided, so ensure the binary is available in `PATH`. The output format
+    is inferred from the destination file extension: `.yaml` / `.yml` triggers a
+    conversion to YAML, while other extensions keep the JSON.
+    """
 
     configure_logging(verbose)
 
