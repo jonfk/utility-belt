@@ -1,10 +1,14 @@
 # List all available recipes (default)
 default:
-    @just --list
+    @just --choose
 
 # Install git-smart-commit using uv
 install-git-smart-commit:
     cd python/git-smart-commit && uv tool install --reinstall .
+
+# Install prune-openapi using uv
+install-prune-openapi:
+    cd python/prune-openapi && uv tool install --reinstall .
 
 # Install start-ssh-proxy script
 install-start-ssh-proxy:
