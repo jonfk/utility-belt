@@ -18,6 +18,8 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
         // --- runs in the page ---
         const sanitize = (s) =>
           (s || "video")
+            .replace(/^new\b[\s\-_:,.]*/i, "")
+            .replace(/on the sexyporn/gi, " ")
             .replace(/https?:\/\/\S+|www\.\S+/gi, " ")
             .replace(/[\\\/:*?"<>|]+/g, " ")
             .replace(/\s+/g, " ")
