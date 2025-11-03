@@ -19,6 +19,7 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
         const sanitize = (s) =>
           (s || "video")
             .replace(/^new\b[\s\-_:,.]*/i, "")
+            .replace(/^latest\b[\s\-_:,.]*/i, "")
             .replace(/on the sexyporn/gi, " ")
             .replace(/https?:\/\/\S+|www\.\S+/gi, " ")
             .replace(/[\\\/:*?"<>|]+/g, " ")
@@ -54,7 +55,22 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
         let ext = (m && m[1].toLowerCase()) || "mp4";
 
         // Whitelist of recognized video extensions
-        const validExts = ["mp4", "webm", "mov", "avi", "mkv", "flv", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp", "ts", "m3u8"];
+        const validExts = [
+          "mp4",
+          "webm",
+          "mov",
+          "avi",
+          "mkv",
+          "flv",
+          "wmv",
+          "m4v",
+          "mpeg",
+          "mpg",
+          "ogv",
+          "3gp",
+          "ts",
+          "m3u8",
+        ];
         if (ext.length > 6 || !validExts.includes(ext)) {
           ext = "mp4"; // force to mp4 if unrecognized or too long
         }
