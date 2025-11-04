@@ -1,4 +1,4 @@
-#!/usr/bin/env uv run
+#!/usr/bin/env uv run --script
 # /// script
 # dependencies = ["pillow>=11.3.0"]
 # ///
