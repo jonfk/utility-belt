@@ -18,6 +18,7 @@ use types::AppError;
 #[derive(Parser)]
 #[command(name = "move-photos-without-duplicates")]
 #[command(about = "Move photos from source to target directory without duplicates")]
+#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
 struct Args {
     /// Custom database file location
     #[arg(long, default_value = "photo_hashes.db")]

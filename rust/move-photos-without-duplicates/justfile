@@ -29,3 +29,7 @@ clippy:
 # Clean build artifacts
 clean:
     cargo clean
+
+# Show the latest commit hash limited to this directory
+git-hash:
+    @git log -1 --pretty=format:%h -- . || echo unavailable
