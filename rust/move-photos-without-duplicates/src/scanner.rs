@@ -7,6 +7,7 @@ use indicatif::MultiProgress;
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::{BufReader, Read};
 use std::sync::Arc;
 use walkdir::WalkDir;
 
@@ -28,7 +29,10 @@ impl FileScanner {
         let mut result = ScanResult::new();
 
         // Phase 1: Directory scanning with spinner
-        let scan_pb = ProgressManager::create_scan_progress(multi, &format!("Scanning directory: {}", directory));
+        let scan_pb = ProgressManager::create_scan_progress(
+            multi,
+            &format!("Scanning directory: {}", directory),
+        );
 
         // Collect all entries and handle walkdir errors
         let mut file_paths = Vec::new();
@@ -41,7 +45,10 @@ impl FileScanner {
                         match Utf8PathBuf::from_path_buf(dir_entry.path().to_path_buf()) {
                             Ok(utf8_path) => {
                                 file_paths.push(utf8_path);
-                                scan_pb.set_message(format!("Scanning... found {} files", file_paths.len()));
+                                scan_pb.set_message(format!(
+                                    "Scanning... found {} files",
+                                    file_paths.len()
+                                ));
                             }
                             Err(path_buf) => {
                                 eprintln!(
@@ -94,7 +101,11 @@ impl FileScanner {
         );
 
         // Process files in batches
+        // Reuse a single vector per batch so we don't repeatedly allocate large buffers.
+        let mut reusable_file_infos = Vec::with_capacity(self.batch_size.max(1));
+
         for (batch_num, batch_paths) in file_paths.chunks(self.batch_size).enumerate() {
+            reusable_file_infos.clear();
             let batch_start = batch_num * self.batch_size;
             process_pb_arc.set_message(format!(
                 "Processing batch {}/{} (files {}-{})",
@@ -115,12 +126,10 @@ impl FileScanner {
                 .collect();
 
             // Separate successful results from errors
-            let mut batch_file_infos = Vec::new();
-
-            for (path, file_result) in batch_paths.iter().zip(batch_results.iter()) {
+            for (path, file_result) in batch_paths.iter().zip(batch_results.into_iter()) {
                 match file_result {
                     Ok(info) => {
-                        batch_file_infos.push(info.clone());
+                        reusable_file_infos.push(info);
                     }
                     Err(e) => {
                         eprintln!("ERROR: Failed to process file: {}", path);
@@ -130,23 +139,23 @@ impl FileScanner {
                 }
             }
 
-            result.files_processed += batch_file_infos.len();
+            result.files_processed += reusable_file_infos.len();
 
             // Store this batch in database using transaction
-            if !batch_file_infos.is_empty() {
-                match db.batch_upsert_file_hashes(&batch_file_infos).await {
+            if !reusable_file_infos.is_empty() {
+                match db.batch_upsert_file_hashes(&reusable_file_infos).await {
                     Ok(()) => {
                         process_pb_arc.set_message(format!(
                             "✓ Batch {}/{} stored ({} files)",
                             batch_num + 1,
                             num_batches,
-                            batch_file_infos.len()
+                            reusable_file_infos.len()
                         ));
                     }
                     Err(e) => {
                         eprintln!("ERROR: Failed to store batch {} in database", batch_num + 1);
                         eprintln!("  Details: {:?}", e);
-                        result.db_errors += batch_file_infos.len();
+                        result.db_errors += reusable_file_infos.len();
                     }
                 }
             }
@@ -157,6 +166,9 @@ impl FileScanner {
             }
         }
 
+        // Release the list of file paths before reporting summary details.
+        drop(file_paths);
+
         process_pb_arc.finish_with_message(format!(
             "✓ Processed {} files in {} batches",
             result.files_processed, num_batches
@@ -164,8 +176,14 @@ impl FileScanner {
 
         // Report summary
         if result.total_errors() > 0 {
-            eprintln!("SUMMARY: Completed with {} total errors", result.total_errors());
-            eprintln!("  - Directory traversal errors: {}", result.traversal_errors);
+            eprintln!(
+                "SUMMARY: Completed with {} total errors",
+                result.total_errors()
+            );
+            eprintln!(
+                "  - Directory traversal errors: {}",
+                result.traversal_errors
+            );
             eprintln!("  - File processing errors: {}", result.processing_errors);
             eprintln!("  - Database storage errors: {}", result.db_errors);
         } else {
@@ -210,12 +228,34 @@ impl FileScanner {
     }
 
     pub fn calculate_file_hash(&self, file_path: &Utf8PathBuf) -> Result<String, AppError> {
-        let contents = fs::read(file_path)
+        let file = fs::File::open(file_path)
             .change_context(AppError::IO)
-            .attach_printable_lazy(|| format!("Failed to read file contents: {}", file_path))?;
+            .attach_printable_lazy(|| format!("Failed to open file for hashing: {}", file_path))?;
+
+        // Use a reasonably sized buffer to keep memory bounded per file, even when hashing concurrently.
+        let mut reader = BufReader::with_capacity(128 * 1024, file);
+        let mut buffer = vec![0u8; 128 * 1024];
 
         let mut hasher = Sha256::new();
-        hasher.update(&contents);
+
+        loop {
+            let bytes_read = reader
+                .read(&mut buffer)
+                .change_context(AppError::IO)
+                .attach_printable_lazy(|| {
+                    format!(
+                        "Failed while streaming file contents for hashing: {}",
+                        file_path
+                    )
+                })?;
+
+            if bytes_read == 0 {
+                break;
+            }
+
+            hasher.update(&buffer[..bytes_read]);
+        }
+
         let hash = hasher.finalize();
 
         Ok(format!("{:x}", hash))

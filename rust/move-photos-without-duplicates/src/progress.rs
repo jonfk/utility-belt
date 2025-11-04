@@ -21,9 +21,11 @@ impl ProgressManager {
     pub fn create_process_progress(multi: &MultiProgress, total: u64) -> ProgressBar {
         let process_pb = multi.add(ProgressBar::new(total));
         process_pb.set_style(
-            ProgressStyle::with_template("📁 [{elapsed}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-                .unwrap()
-                .progress_chars("##-"),
+            ProgressStyle::with_template(
+                "📁 [{elapsed}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+            )
+            .unwrap()
+            .progress_chars("##-"),
         );
         process_pb
     }
@@ -31,9 +33,11 @@ impl ProgressManager {
     pub fn create_cleanup_progress(multi: &MultiProgress, total: u64) -> ProgressBar {
         let process_pb = multi.add(ProgressBar::new(total));
         process_pb.set_style(
-            ProgressStyle::with_template("🗑️  [{elapsed}] {bar:40.red/yellow} {pos:>7}/{len:7} {msg}")
-                .unwrap()
-                .progress_chars("##-"),
+            ProgressStyle::with_template(
+                "🗑️  [{elapsed}] {bar:40.red/yellow} {pos:>7}/{len:7} {msg}",
+            )
+            .unwrap()
+            .progress_chars("##-"),
         );
         process_pb
     }
@@ -41,9 +45,11 @@ impl ProgressManager {
     pub fn create_copy_progress(multi: &MultiProgress, total: u64) -> ProgressBar {
         let process_pb = multi.add(ProgressBar::new(total));
         process_pb.set_style(
-            ProgressStyle::with_template("📋 [{elapsed}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-                .unwrap()
-                .progress_chars("##-"),
+            ProgressStyle::with_template(
+                "📋 [{elapsed}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+            )
+            .unwrap()
+            .progress_chars("##-"),
         );
         process_pb
     }

@@ -82,7 +82,9 @@ async fn main() -> Result<(), AppError> {
         Commands::Hash { target_dir } => {
             println!("Running hash command for target directory: {}", target_dir);
             let scanner = FileScanner::new(args.batch_size);
-            scanner.scan_and_hash_directory(&target_dir, &db, &multi).await?;
+            scanner
+                .scan_and_hash_directory(&target_dir, &db, &multi)
+                .await?;
             println!("Directory scanning and hashing completed");
         }
         Commands::Copy {
@@ -93,14 +95,18 @@ async fn main() -> Result<(), AppError> {
             println!("Running copy command");
             FileCopier::validate_copy_command(&source, &target)?;
             let copier = FileCopier::new();
-            copier.copy_files_without_duplicates(&source, &target, &db, &multi, dry_run).await?;
+            copier
+                .copy_files_without_duplicates(&source, &target, &db, &multi, dry_run)
+                .await?;
             println!("Copy operation completed");
         }
         Commands::Cleanup { dry_run } => {
             println!("Running cleanup command");
             let scanner = FileScanner::new(args.batch_size);
             let cleaner = FileCleaner::new();
-            cleaner.cleanup_tracked_files(&db, &scanner, &multi, dry_run).await?;
+            cleaner
+                .cleanup_tracked_files(&db, &scanner, &multi, dry_run)
+                .await?;
             println!("Cleanup operation completed");
         }
         Commands::Status { detailed } => {

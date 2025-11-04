@@ -380,7 +380,9 @@ impl Database {
         .await
         .change_context(DatabaseError::TrackCopiedFile)?;
 
-        tx.commit().await.change_context(DatabaseError::TrackCopiedFile)?;
+        tx.commit()
+            .await
+            .change_context(DatabaseError::TrackCopiedFile)?;
         Ok(())
     }
 

@@ -28,7 +28,8 @@ impl FileCleaner {
         let mut result = CleanupOperationResult::new();
 
         // Phase 1: Get all tracked files
-        let scan_pb = ProgressManager::create_scan_progress(multi, "Loading tracked files from database...");
+        let scan_pb =
+            ProgressManager::create_scan_progress(multi, "Loading tracked files from database...");
 
         let copied_files = db
             .get_copied_files()
@@ -60,7 +61,10 @@ impl FileCleaner {
 
         println!("\n=== PROCESSING COPIED FILES ===");
         for copied_file in copied_files {
-            match self.cleanup_copied_file(&copied_file, db, scanner, dry_run).await {
+            match self
+                .cleanup_copied_file(&copied_file, db, scanner, dry_run)
+                .await
+            {
                 Ok(SingleCleanupResult::Deleted) => {
                     result.deleted += 1;
                     println!(
@@ -89,7 +93,10 @@ impl FileCleaner {
 
         println!("\n=== PROCESSING DUPLICATE FILES ===");
         for duplicate_file in duplicate_files {
-            match self.cleanup_duplicate_file(&duplicate_file, db, scanner, dry_run).await {
+            match self
+                .cleanup_duplicate_file(&duplicate_file, db, scanner, dry_run)
+                .await
+            {
                 Ok(SingleCleanupResult::Deleted) => {
                     result.deleted += 1;
                     println!(
@@ -143,7 +150,8 @@ impl FileCleaner {
         println!("Retrieving status of files tracked for cleanup...");
 
         // Get tracked files from database with spinner
-        let scan_pb = ProgressManager::create_scan_progress(multi, "Loading tracked files from database...");
+        let scan_pb =
+            ProgressManager::create_scan_progress(multi, "Loading tracked files from database...");
 
         let copied_files = db
             .get_copied_files()
@@ -232,12 +240,16 @@ impl FileCleaner {
 
         // Verify target file integrity by checking its hash matches the stored hash
         if !dry_run {
-            let target_hash = scanner.calculate_file_hash(&copied_file.target_path)
+            let target_hash = scanner
+                .calculate_file_hash(&copied_file.target_path)
                 .change_context(AppError::Cleanup)
                 .attach_printable_lazy(|| {
-                    format!("Failed to calculate hash for target file: {}", copied_file.target_path)
+                    format!(
+                        "Failed to calculate hash for target file: {}",
+                        copied_file.target_path
+                    )
                 })?;
-            
+
             if target_hash != copied_file.hash {
                 return Ok(SingleCleanupResult::Skipped(
                     "target hash mismatch; refusing to delete source".to_string(),
@@ -323,12 +335,16 @@ impl FileCleaner {
                 ));
             }
 
-            let original_hash = scanner.calculate_file_hash(&duplicate_file.original_path)
+            let original_hash = scanner
+                .calculate_file_hash(&duplicate_file.original_path)
                 .change_context(AppError::Cleanup)
                 .attach_printable_lazy(|| {
-                    format!("Failed to calculate hash for original file: {}", duplicate_file.original_path)
+                    format!(
+                        "Failed to calculate hash for original file: {}",
+                        duplicate_file.original_path
+                    )
                 })?;
-            
+
             if original_hash != duplicate_file.hash {
                 return Ok(SingleCleanupResult::Skipped(
                     "original hash mismatch; refusing to delete duplicate".to_string(),

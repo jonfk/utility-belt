@@ -47,7 +47,9 @@ impl FileCopier {
         println!("  Target directory: {}", target);
 
         // Print warning about target directory needing to be hashed
-        println!("\n⚠️  WARNING: The target directory should be hashed before running copy operations");
+        println!(
+            "\n⚠️  WARNING: The target directory should be hashed before running copy operations"
+        );
         println!("   to ensure effective duplicate detection. Run:");
         println!("   {} hash {}", env!("CARGO_PKG_NAME"), target);
 
@@ -70,7 +72,10 @@ impl FileCopier {
         let mut result = CopyOperationResult::new();
 
         // Phase 1: Directory scanning with spinner
-        let scan_pb = ProgressManager::create_scan_progress(multi, &format!("Scanning source directory: {}", dir_a));
+        let scan_pb = ProgressManager::create_scan_progress(
+            multi,
+            &format!("Scanning source directory: {}", dir_a),
+        );
 
         // Collect all files in directory A
         let mut file_paths = Vec::new();
@@ -84,7 +89,10 @@ impl FileCopier {
                         match Utf8PathBuf::from_path_buf(dir_entry.path().to_path_buf()) {
                             Ok(utf8_path) => {
                                 file_paths.push(utf8_path);
-                                scan_pb.set_message(format!("Scanning... found {} files", file_paths.len()));
+                                scan_pb.set_message(format!(
+                                    "Scanning... found {} files",
+                                    file_paths.len()
+                                ));
                             }
                             Err(path_buf) => {
                                 eprintln!("ERROR: Non-UTF8 path encountered: {:?}", path_buf);
@@ -118,7 +126,10 @@ impl FileCopier {
         process_pb.set_message("Processing files...");
 
         for file_path in file_paths {
-            match self.process_single_file(&file_path, dir_a, dir_b, db, dry_run).await {
+            match self
+                .process_single_file(&file_path, dir_a, dir_b, db, dry_run)
+                .await
+            {
                 Ok(SingleCopyResult::Copied) => {
                     result.copied += 1;
                     process_pb.set_message(format!(
@@ -250,14 +261,18 @@ impl FileCopier {
         // Copy the file
         fs::copy(file_path, &target_path)
             .change_context(AppError::Copy)
-            .attach_printable_lazy(|| {
-                format!("Failed to copy {} to {}", file_path, target_path)
-            })?;
+            .attach_printable_lazy(|| format!("Failed to copy {} to {}", file_path, target_path))?;
 
         // Record the copied file atomically (both hash storage and copy tracking)
         let file_size = metadata.len();
         if let Err(e) = db
-            .record_copied_file(file_path, &target_path, &file_hash, file_size, last_modified)
+            .record_copied_file(
+                file_path,
+                &target_path,
+                &file_hash,
+                file_size,
+                last_modified,
+            )
             .await
         {
             eprintln!(
