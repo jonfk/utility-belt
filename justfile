@@ -19,3 +19,8 @@ install-start-ssh-proxy:
 install-sync-github-keys:
     mkdir -p ~/.local/bin
     ln -sf $(pwd)/sh/sync-github-keys.sh ~/.local/bin/sync-github-keys
+
+# Install organize-files-into-dirs-by-date script
+install-organize-files-into-dirs-by-date:
+    mkdir -p ~/.local/bin
+    ln -sf $(pwd)/python/organize-files-into-dirs-by-date.py ~/.local/bin/organize-files-into-dirs-by-date
