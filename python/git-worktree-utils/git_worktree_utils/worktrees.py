@@ -15,13 +15,13 @@ from .models import Paths, RepoContext, WorktreeEntry
 
 
 def ensure_admin_clone(paths: Paths, repo_ctx: RepoContext, console: Console) -> None:
-    if paths.admin_path.exists():
-        return
-    ensure_dirs([paths.admin_path.parent])
-    with console.status("Cloning admin repository…"):
-        run_git(
-            ["clone", "--no-checkout", repo_ctx.metadata.origin_url, str(paths.admin_path)],
-        )
+    if not paths.admin_path.exists():
+        ensure_dirs([paths.admin_path.parent])
+        with console.status("Cloning admin repository…"):
+            run_git(
+                ["clone", "--no-checkout", repo_ctx.metadata.origin_url, str(paths.admin_path)],
+            )
+    _ensure_detached_head(paths.admin_path)
 
 
 def fetch_admin_clone(paths: Paths, console: Console) -> None:
@@ -213,6 +213,18 @@ def _cleanup_empty_dirs(path: Path, stop: Path) -> None:
         except OSError:
             break
         current = current.parent
+
+
+def _ensure_detached_head(repo_path: Path) -> None:
+    """Detach HEAD if it still points at a local branch."""
+    result = run_git(["symbolic-ref", "-q", "HEAD"], cwd=repo_path, check=False)
+    if result.returncode != 0:
+        return
+    head_ref = result.stdout.strip()
+    if not head_ref:
+        return
+    commit = run_git(["rev-parse", head_ref], cwd=repo_path).stdout.strip()
+    run_git(["update-ref", "--no-deref", "HEAD", commit], cwd=repo_path)
 
 
 __all__ = [
