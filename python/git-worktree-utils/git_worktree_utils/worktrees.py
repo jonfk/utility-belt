@@ -35,7 +35,9 @@ def ensure_admin_ready(paths: Paths, repo_ctx: RepoContext, console: Console) ->
 
 def list_worktrees(paths: Paths) -> list[WorktreeEntry]:
     output = run_git(["worktree", "list", "--porcelain"], cwd=paths.admin_path)
-    return _parse_worktree_porcelain(output.stdout)
+    entries = _parse_worktree_porcelain(output.stdout)
+    # The admin clone is the control repo that spawns worktrees; it should not be displayed to users.
+    return [entry for entry in entries if entry.path != paths.admin_path]
 
 
 def render_worktrees_table(entries: Sequence[WorktreeEntry], console: Console) -> None:
