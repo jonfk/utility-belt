@@ -106,13 +106,17 @@ def rm(
     force: bool = typer.Option(False, "--force", help="Force removal even if the worktree is dirty."),
 ) -> None:
     repo_ctx, service = _build_service(ctx)
+    admin_repo_path = service.paths.admin_repo
     target_path = path
     if target_path is None:
         entries = service.list_worktrees()
+        entries = _filter_removable_worktrees(entries, admin_repo_path)
         if not entries:
-            raise ValidationError("No worktrees available to remove.")
+            raise ValidationError("No removable worktrees available.")
         target_entry = _prompt_worktree(entries)
         target_path = target_entry.path
+    if Path(target_path).expanduser() == admin_repo_path:
+        raise ValidationError("Cannot remove the admin repository worktree.")
     target_path = target_path.expanduser()
     service.remove_worktree(target_path, force=force)
     console.print(f"Removed worktree at {target_path}")
@@ -190,6 +194,13 @@ def _build_worktree_choice_data(entries: list[WorktreeEntry]) -> tuple[list[Choi
         lookup[key] = entry
         path_choices.append(Choice(value=key, name=f"{entry.display_name} · {entry.path}"))
     return path_choices, lookup
+
+
+def _filter_removable_worktrees(entries: list[WorktreeEntry], admin_repo: Path) -> list[WorktreeEntry]:
+    """Exclude admin repository entries from the removable list."""
+
+    admin_repo = admin_repo.expanduser()
+    return [entry for entry in entries if Path(entry.path).expanduser() != admin_repo]
 
 
 def _fail(message: str, code: int = 1) -> None:
