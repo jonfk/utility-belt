@@ -51,7 +51,10 @@
 - Triggered whenever `add` or `rm` lack enough arguments or when users pass `--select` explicitly.
 - Prompts use `InquirerPy` fuzzy finder:
   - **Worktree name input**: free-form text box validated to ensure non-empty, slash-free values before slugifying for the filesystem.
-  - **Branch selection**: merges local (`git branch --format`) and remote (`git branch -r`) names; default branch is pinned to the top. Options: choose existing or "Create new branch…" to type a name.
+  - **Branch selection**: 
+    - Offer the choice of create new or select existing branch
+    - if select existing: merges local (`git branch --format`) and remote (`git branch -r`) names; default branch is pinned to the top. Options: choose existing or "Create new branch…" to type a name.
+        - Should remote branches have the `origin/` or `<remote>/` stripped? If selecting a remote branch should it `--set-upstream-to=`?
   - **Starting point selection** (only when creating a new branch): options include default branch, any existing branch/tag, or manual ref input.
   - **Worktree removal selection**: entries display `name (branch) · path`. Supports multi-select if we want to extend later; MVP removes one at a time.
 - Users can bypass prompts entirely by supplying all positional arguments.
