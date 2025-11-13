@@ -26,7 +26,7 @@ def ensure_admin_clone(paths: Paths, repo_ctx: RepoContext, console: Console) ->
 
 def fetch_admin_clone(paths: Paths, console: Console) -> None:
     with console.status("Fetching refs in admin clone…"):
-        run_git(["fetch", "origin", "--prune"], cwd=paths.admin_path)
+        run_git(["fetch", "--no-tags", "origin", "--prune"], cwd=paths.admin_path)
 
 
 def ensure_admin_ready(paths: Paths, repo_ctx: RepoContext, console: Console) -> None:

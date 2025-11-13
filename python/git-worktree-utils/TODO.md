@@ -1,4 +1,4 @@
-- [ ] Add fuzzy finder to branch selection
-- [ ] Better default input in the worktree name prompt. It is currently set to main always. It should be empty by default
-- [ ] Improve the branch selection when doing the existing branch selection. Show but gray out and prevent selection of branches that are currently already checked out by a worktree.
+- [x] Add fuzzy finder to branch selection
+- [x] Better default input in the worktree name prompt. It is currently set to main always. It should be empty by default
+- [x] Improve the branch selection when doing the existing branch selection. Show but gray out and prevent selection of branches that are currently already checked out by a worktree.
 - [ ] 

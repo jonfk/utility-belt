@@ -25,7 +25,12 @@ def run_git(
         capture_output=True,
     )
     if check and result.returncode != 0:
-        raise GitCommandError(command, result.returncode, result.stderr)
+        raise GitCommandError(
+            command,
+            result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
     return result
 
 

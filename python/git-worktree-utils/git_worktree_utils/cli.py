@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 
 from .config import (
     build_paths,
     build_repo_context,
     load_env_config,
 )
-from .exceptions import GitWorktreeError, UserAbort, ValidationError
+from .exceptions import GitCommandError, GitWorktreeError, UserAbort, ValidationError
 from .interactive import (
     BranchChoice,
     prompt_branch_mode,
@@ -93,7 +95,10 @@ def main(
         repo_ctx = build_repo_context(repo)
         paths = build_paths(env, repo_ctx.metadata)
     except GitWorktreeError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        if isinstance(exc, GitCommandError):
+            _render_git_error(console, exc)
+        else:
+            console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
     ctx.obj = AppState(env=env, repo_ctx=repo_ctx, paths=paths, console=console, verbose=verbose)
 
@@ -111,15 +116,16 @@ def ls(
     json_: bool = typer.Option(False, "--json", help="Output JSON instead of a table."),
 ) -> None:
     state = _require_state(ctx)
-    ensure_admin_ready(state.paths, state.repo_ctx, state.console)
-    entries = list_worktrees(state.paths)
-    if not entries:
-        state.console.print("No worktrees registered for this repository.")
-        return
-    if json_:
-        render_worktrees_json(entries, state.console)
-    else:
-        render_worktrees_table(entries, state.console)
+    with _git_error_boundary(state.console):
+        ensure_admin_ready(state.paths, state.repo_ctx, state.console)
+        entries = list_worktrees(state.paths)
+        if not entries:
+            state.console.print("No worktrees registered for this repository.")
+            return
+        if json_:
+            render_worktrees_json(entries, state.console)
+        else:
+            render_worktrees_table(entries, state.console)
 
 
 @app.command()
@@ -147,53 +153,54 @@ def add(
     ),
 ) -> None:
     state = _require_state(ctx)
-    ensure_admin_ready(state.paths, state.repo_ctx, state.console)
+    with _git_error_boundary(state.console):
+        ensure_admin_ready(state.paths, state.repo_ctx, state.console)
 
-    try:
-        missing_required: list[str] = []
-        if not worktree_name:
-            missing_required.append("worktree name")
-        if not branch:
-            missing_required.append("branch")
+        try:
+            missing_required: list[str] = []
+            if not worktree_name:
+                missing_required.append("worktree name")
+            if not branch:
+                missing_required.append("branch")
 
-        if interactive is True:
-            interactive_mode = True
-        elif interactive is False:
-            interactive_mode = False
-        else:
-            interactive_mode = bool(missing_required)
+            if interactive is True:
+                interactive_mode = True
+            elif interactive is False:
+                interactive_mode = False
+            else:
+                interactive_mode = bool(missing_required)
 
-        if missing_required and not interactive_mode:
-            missing_display = ", ".join(missing_required)
-            raise ValidationError(
-                f"Missing required arguments: {missing_display}. Provide them or rerun with --interactive."
+            if missing_required and not interactive_mode:
+                missing_display = ", ".join(missing_required)
+                raise ValidationError(
+                    f"Missing required arguments: {missing_display}. Provide them or rerun with --interactive."
+                )
+
+            resolved_name = worktree_name
+            if interactive_mode and not resolved_name:
+                resolved_name = _prompt_worktree_name(state)
+            resolution = _resolve_branch_inputs(
+                state,
+                branch=branch,
+                start_point=from_ref,
+                track=track,
+                interactive=interactive_mode,
             )
+        except (ValidationError, UserAbort) as exc:
+            state.console.print(f"[yellow]{exc}[/yellow]")
+            raise typer.Exit(1) from exc
 
-        resolved_name = worktree_name
-        if interactive_mode and not resolved_name:
-            resolved_name = _prompt_worktree_name(state)
-        resolution = _resolve_branch_inputs(
-            state,
-            branch=branch,
-            start_point=from_ref,
-            track=track,
-            interactive=interactive_mode,
+        target = add_worktree(
+            state.paths,
+            state.repo_ctx,
+            worktree_name=resolved_name,
+            branch=resolution.branch,
+            start_point=resolution.start_point,
+            track=resolution.track,
+            no_track_checkout=resolution.no_track_checkout,
+            console=state.console,
         )
-    except (ValidationError, UserAbort) as exc:
-        state.console.print(f"[yellow]{exc}[/yellow]")
-        raise typer.Exit(1) from exc
-
-    target = add_worktree(
-        state.paths,
-        state.repo_ctx,
-        worktree_name=resolved_name,
-        branch=resolution.branch,
-        start_point=resolution.start_point,
-        track=resolution.track,
-        no_track_checkout=resolution.no_track_checkout,
-        console=state.console,
-    )
-    state.console.print(f"[green]Worktree created at {target}[/green]")
+        state.console.print(f"[green]Worktree created at {target}[/green]")
 
 
 @app.command()
@@ -204,32 +211,35 @@ def rm(
     select: bool = typer.Option(False, "--select", help="Open an interactive selector to choose the worktree."),
 ) -> None:
     state = _require_state(ctx)
-    ensure_admin_ready(state.paths, state.repo_ctx, state.console)
-    target_path: Path | None = None
+    with _git_error_boundary(state.console):
+        ensure_admin_ready(state.paths, state.repo_ctx, state.console)
+        target_path: Path | None = None
 
-    if select or path is None:
-        entries = list_worktrees(state.paths)
-        if not entries:
-            state.console.print("No worktrees found to delete.")
-            raise typer.Exit(0)
-        mapping = {f"{entry.name} ({entry.branch or 'detached'}) · {entry.path}": entry.path for entry in entries}
-        try:
-            selection = prompt_worktree_selection(list(mapping.keys()))
-        except UserAbort as exc:
-            state.console.print("Selection cancelled.")
-            raise typer.Exit(1) from exc
-        target_path = mapping[selection]
-    else:
-        target_path = path.expanduser().resolve()
+        if select or path is None:
+            entries = list_worktrees(state.paths)
+            if not entries:
+                state.console.print("No worktrees found to delete.")
+                raise typer.Exit(0)
+            mapping = {
+                f"{entry.name} ({entry.branch or 'detached'}) · {entry.path}": entry.path for entry in entries
+            }
+            try:
+                selection = prompt_worktree_selection(list(mapping.keys()))
+            except UserAbort as exc:
+                state.console.print("Selection cancelled.")
+                raise typer.Exit(1) from exc
+            target_path = mapping[selection]
+        else:
+            target_path = path.expanduser().resolve()
 
-    remove_worktree(
-        state.paths,
-        state.repo_ctx,
-        target_path,
-        force=force,
-        console=state.console,
-    )
-    state.console.print(f"[green]Removed worktree {target_path}[/green]")
+        remove_worktree(
+            state.paths,
+            state.repo_ctx,
+            target_path,
+            force=force,
+            console=state.console,
+        )
+        state.console.print(f"[green]Removed worktree {target_path}[/green]")
 
 
 def _prompt_worktree_name(state: AppState) -> str:
@@ -353,6 +363,30 @@ def _build_start_point_choices(state: AppState, summary: dict[str, list[str]]) -
     if choices and not any(choice.is_default for choice in choices):
         choices[0].is_default = True
     return choices
+
+
+def _print_stream_panel(console: Console, title: str, content: str, *, style: str) -> None:
+    text = content.strip()
+    if not text:
+        return
+    console.print(Panel.fit(text, title=title, border_style=style))
+
+
+def _render_git_error(console: Console, exc: GitCommandError) -> None:
+    command = " ".join(exc.command)
+    console.print(f"[red]Git command failed (exit {exc.returncode}):[/red] {command}")
+    _print_stream_panel(console, "stdout", exc.stdout, style="yellow")
+    _print_stream_panel(console, "stderr", exc.stderr, style="red")
+
+
+@contextmanager
+def _git_error_boundary(console: Console):
+    try:
+        yield
+    except GitCommandError as exc:
+        _render_git_error(console, exc)
+        exit_code = exc.returncode if exc.returncode != 0 else 1
+        raise typer.Exit(exit_code) from exc
 
 
 __all__ = ["app"]

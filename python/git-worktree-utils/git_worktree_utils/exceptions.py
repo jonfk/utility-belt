@@ -20,13 +20,26 @@ class RepoDetectionError(GitWorktreeError):
 class GitCommandError(GitWorktreeError):
     """Raised when an underlying git command fails."""
 
-    def __init__(self, command: list[str], returncode: int, stderr: str | None = None):
+    def __init__(
+        self,
+        command: list[str],
+        returncode: int,
+        *,
+        stdout: str | None = None,
+        stderr: str | None = None,
+    ):
         self.command = command
         self.returncode = returncode
+        self.stdout = stdout or ""
         self.stderr = stderr or ""
         message = f"git command failed (exit {returncode}): {' '.join(command)}"
-        if self.stderr:
-            message = f"{message}\n{self.stderr.strip()}"
+        details = "\n".join(
+            section
+            for section in (self.stdout.strip(), self.stderr.strip())
+            if section
+        )
+        if details:
+            message = f"{message}\n{details}"
         super().__init__(message)
 
 
