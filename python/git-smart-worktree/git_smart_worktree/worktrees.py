@@ -11,8 +11,6 @@ from .exceptions import ValidationError
 from .fs import ensure_directory, slugify_branch
 from .models import RepoContext, RepoPaths, WorktreeEntry
 
-DEFAULT_CONTEXTS = ["main", "feature", "review", "release", "hotfix", "experiment"]
-
 
 @dataclass
 class WorktreeService:
@@ -39,12 +37,12 @@ class WorktreeService:
                 path = raw.get("path")
                 if not path:
                     continue
-                context_name, _ = derive_context(path, self.paths.worktree_repo_root)
+                name = derive_worktree_name(path, self.paths.worktree_repo_root)
                 status = "locked" if raw.get("locked") else "prunable" if raw.get("prunable") else "active"
                 entry = WorktreeEntry(
                     path=path,
+                    name=name,
                     branch=raw.get("branch"),
-                    context=context_name,
                     status=status,
                 )
                 entries[path] = entry
@@ -52,30 +50,18 @@ class WorktreeService:
             for path in iter_worktree_directories(self.paths.worktree_repo_root):
                 if path in entries:
                     continue
-                context_name, branch_slug = derive_context(path, self.paths.worktree_repo_root)
+                name = derive_worktree_name(path, self.paths.worktree_repo_root)
                 entries[path] = WorktreeEntry(
                     path=path,
-                    branch=branch_slug,
-                    context=context_name,
+                    name=name,
+                    branch=None,
                     status="unknown",
                 )
-        return sorted(entries.values(), key=lambda e: (e.context or "", e.branch or ""))
+        return sorted(entries.values(), key=lambda e: (e.name or "", e.branch or ""))
 
-    def list_contexts(self) -> list[str]:
-        contexts = set(DEFAULT_CONTEXTS)
-        root = self.paths.worktree_repo_root
-        if root.exists():
-            for child in root.iterdir():
-                if child.is_dir():
-                    contexts.add(child.name)
-        for entry in self.list_worktrees():
-            if entry.context:
-                contexts.add(entry.context)
-        return sorted(contexts)
-
-    def add_worktree(self, context_name: str, branch: str, start_point: str | None = None) -> Path:
-        self._validate_context_name(context_name)
-        target_dir = self._target_path(context_name, branch)
+    def add_worktree(self, worktree_name: str, branch: str, start_point: str | None = None) -> Path:
+        self.validate_worktree_name(worktree_name)
+        target_dir = self._target_path(worktree_name)
         if target_dir.exists():
             raise ValidationError(f"Worktree path already exists: {target_dir}")
         admin_repo = self.ensure_admin_repo()
@@ -125,40 +111,35 @@ class WorktreeService:
                 usage.setdefault(branch, []).append(path)
         return usage
 
-    def _target_path(self, context_name: str, branch: str) -> Path:
-        slug = slugify_branch(branch)
-        return self.paths.worktree_repo_root / context_name / slug
+    def _target_path(self, worktree_name: str) -> Path:
+        slug = slugify_branch(worktree_name)
+        return self.paths.worktree_repo_root / slug
 
     @staticmethod
-    def _validate_context_name(value: str) -> None:
+    def validate_worktree_name(value: str) -> None:
         if not value.strip():
-            raise ValidationError("Context name cannot be empty.")
+            raise ValidationError("Worktree name cannot be empty.")
         if "/" in value or "\0" in value:
-            raise ValidationError("Context name cannot contain '/' or null characters.")
+            raise ValidationError("Worktree name cannot contain '/' or null characters.")
 
     def _ensure_detached_head(self, repo: Path) -> None:
         git.ensure_detached_head(repo)
 
 
-def derive_context(path: Path, repo_root: Path) -> tuple[str | None, str | None]:
+def derive_worktree_name(path: Path, repo_root: Path) -> str | None:
     try:
         relative = path.relative_to(repo_root)
     except ValueError:
-        return None, None
+        return None
     parts = relative.parts
     if not parts:
-        return None, None
-    context = parts[0]
-    branch = parts[1] if len(parts) > 1 else None
-    return context, branch
+        return None
+    return parts[0]
 
 
 def iter_worktree_directories(root: Path) -> Iterable[Path]:
     if not root.exists():
         return
-    for context_dir in root.iterdir():
-        if not context_dir.is_dir():
-            continue
-        for branch_dir in context_dir.iterdir():
-            if branch_dir.is_dir():
-                yield branch_dir
+    for candidate in root.iterdir():
+        if candidate.is_dir():
+            yield candidate

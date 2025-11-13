@@ -37,7 +37,7 @@ dependencies = [
 requires-dist = [
     { name = "inquirerpy", specifier = ">=0.3.4" },
     { name = "rich", specifier = ">=13.7.0" },
-    { name = "typer", extras = ["all"], specifier = ">=0.12.3" },
+    { name = "typer", specifier = ">=0.12.3,<0.21" },
 ]
 
 [[package]]

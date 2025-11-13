@@ -37,12 +37,12 @@ class WorktreeEntry:
     """Represents a single worktree tracked by git."""
 
     path: Path
+    name: str | None
     branch: str | None
-    context: str | None
     status: str
 
     @property
     def display_name(self) -> str:
-        context = self.context or "?"
+        name = self.name or "?"
         branch = self.branch or "(detached)"
-        return f"{context}/{branch}"
+        return f"{name} ({branch})"

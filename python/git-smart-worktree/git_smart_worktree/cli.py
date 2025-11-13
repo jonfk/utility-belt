@@ -14,7 +14,7 @@ from .config import load_runtime
 from .exceptions import GitCommandError, MissingEnvError, ValidationError, WorktreeError
 from .interactive import Choice, build_choices, fuzzy_select, text_input
 from .models import WorktreeEntry
-from .worktrees import DEFAULT_CONTEXTS, WorktreeService
+from .worktrees import WorktreeService
 
 app = typer.Typer(help="Manage git worktrees with opinionated layouts")
 console = Console()
@@ -42,17 +42,14 @@ def main(
 def ls(
     ctx: typer.Context,
     show_all: bool = typer.Option(False, "--all", help="Include filesystem directories not tracked by git."),
-    context_filter: str | None = typer.Option(None, "--context", help="Filter results by context folder."),
     as_json: bool = typer.Option(False, "--json", help="Output JSON for scripting."),
 ) -> None:
     repo_ctx, service = _build_service(ctx)
     entries = service.list_worktrees(include_all=show_all)
-    if context_filter:
-        entries = [entry for entry in entries if entry.context == context_filter]
     if as_json:
         data = [
             {
-                "context": entry.context,
+                "name": entry.name,
                 "branch": entry.branch,
                 "path": str(entry.path),
                 "status": entry.status,
@@ -65,19 +62,19 @@ def ls(
         console.print("No worktrees found.")
         return
     table = Table(show_header=True, header_style="bold")
-    table.add_column("Context")
+    table.add_column("Name")
     table.add_column("Branch")
     table.add_column("Status")
     table.add_column("Path")
     for entry in entries:
-        table.add_row(entry.context or "?", entry.branch or "(detached)", entry.status, str(entry.path))
+        table.add_row(entry.name or "?", entry.branch or "(detached)", entry.status, str(entry.path))
     console.print(table)
 
 
 @app.command(help="Add a new worktree")
 def add(
     ctx: typer.Context,
-    context_name: str | None = typer.Argument(None, help="Context folder (feature/review/etc)."),
+    worktree_name: str | None = typer.Argument(None, help="Name of the worktree directory."),
     branch: str | None = typer.Argument(None, help="Branch to checkout or create."),
     from_ref: str | None = typer.Option(
         None,
@@ -86,13 +83,13 @@ def add(
     ),
 ) -> None:
     repo_ctx, service = _build_service(ctx)
-    context_name = context_name or _prompt_context(service)
+    worktree_name = worktree_name or _prompt_worktree_name(service)
     branch = branch or _prompt_branch(service, repo_ctx.default_branch)
     local_exists, remote_exists = service.branch_status(branch)
     start_point = from_ref
     if not local_exists and not remote_exists and not start_point:
         start_point = _prompt_start_point(service, repo_ctx.default_branch)
-    target = service.add_worktree(context_name, branch, start_point=start_point)
+    target = service.add_worktree(worktree_name, branch, start_point=start_point)
     console.print(f"Created worktree at {target}")
 
 
@@ -131,14 +128,15 @@ def _build_service(ctx: typer.Context) -> tuple[Any, WorktreeService]:
         _fail(str(err))
 
 
-def _prompt_context(service: WorktreeService) -> str:
-    contexts = service.list_contexts()
-    choices = [Choice(value=ctx, name=ctx) for ctx in contexts]
-    create_choice = Choice(value="__new__", name="Create new context…")
-    selection = fuzzy_select("Select context", choices + [create_choice])
-    if selection == "__new__":
-        return text_input("Context name")
-    return str(selection)
+def _prompt_worktree_name(service: WorktreeService) -> str:
+    while True:
+        candidate = text_input("Worktree name")
+        try:
+            service.validate_worktree_name(candidate)
+        except ValidationError as exc:
+            console.print(f"[red]{exc}[/red]")
+            continue
+        return candidate
 
 
 def _prompt_branch(service: WorktreeService, default_branch: str) -> str:

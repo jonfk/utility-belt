@@ -8,7 +8,7 @@
 ## 2. Environment & Configuration
 - **Required env vars** (validated before command execution):
   - `GIT_WORKTREE_ADMIN_ROOT`: root folder storing the canonical admin clone structure `<host>/<owner>/<repo>`.
-  - `GIT_WORKTREE_ROOT`: root folder for worktree directories `<host>/<owner>/<repo>/<context>/<branch-slug>`.
+  - `GIT_WORKTREE_ROOT`: root folder for worktree directories `<host>/<owner>/<repo>/<worktree-name>`.
 - CLI exits with actionable messaging if either variable is unset or points to a non-writable path.
 - **Repository detection**:
   - Default: infer repo from current working directory via `git rev-parse --show-toplevel`.
@@ -18,8 +18,8 @@
 
 ## 3. Directory Layout Policy
 - Admin clone lives at `GIT_WORKTREE_ADMIN_ROOT/<host>/<owner>/<repo>` (non-bare, `--no-checkout`). Created lazily if absent by cloning the resolved origin URL once.
-- Worktrees live under `GIT_WORKTREE_ROOT/<host>/<owner>/<repo>/<context>/<branch-slug>`.
-- `branch-slug` replaces `/` with `__` and spaces with `-`; contexts use the literal folder name chosen by the user.
+- Worktrees live under `GIT_WORKTREE_ROOT/<host>/<owner>/<repo>/<worktree-name>`.
+- Worktree names are user supplied and slugified by replacing `/` with `__`, spaces with `-`, and non-alphanumeric characters with `-`.
 - CLI ensures parent directories exist before invoking `git worktree add`.
 
 ## 4. Dependencies & Tooling
@@ -34,13 +34,12 @@
 - Root command: `git-smart-worktree`.
 - **Global options**: `--repo PATH`, `--verbose`, `--version`.
 - **Commands**:
-  - `ls [--all] [--context CONTEXT] [--json]`
-    - Lists known worktrees for the resolved repo. Default view: table with columns `context`, `branch`, `path`, `status`.
+  - `ls [--all] [--json]`
+    - Lists known worktrees for the resolved repo. Default view: table with columns `name`, `branch`, `path`, `status`.
     - `--all` scans filesystem directories even if git no longer tracks them; otherwise rely on `git worktree list --porcelain`.
-    - `--context` filters by context folder.
     - `--json` outputs machine-readable JSON array.
-  - `add [CONTEXT] [BRANCH] [--from START] [--track REMOTE]`
-    - Adds a worktree rooted at `<context>/<branch-slug>`; arguments optional.
+  - `add [WORKTREE_NAME] [BRANCH] [--from START] [--track REMOTE]`
+    - Adds a worktree rooted at `<worktree-name>`; arguments optional.
     - If `BRANCH` does not exist, create it (optionally from `START`, defaulting to repo default branch) before `git worktree add`.
     - Non-interactive when all required params are provided; otherwise opens guided prompts (Section 6).
   - `rm [PATH] [--force] [--select]`
@@ -51,10 +50,10 @@
 ## 6. Interactive & Fuzzy UX
 - Triggered whenever `add` or `rm` lack enough arguments or when users pass `--select` explicitly.
 - Prompts use `InquirerPy` fuzzy finder:
-  - **Context selection**: initial list `['main', 'feature', 'review', 'release', 'hotfix', 'experiment']` plus previously seen contexts under the repo. Includes "Create new context…" entry that opens a free-form input.
+  - **Worktree name input**: free-form text box validated to ensure non-empty, slash-free values before slugifying for the filesystem.
   - **Branch selection**: merges local (`git branch --format`) and remote (`git branch -r`) names; default branch is pinned to the top. Options: choose existing or "Create new branch…" to type a name.
   - **Starting point selection** (only when creating a new branch): options include default branch, any existing branch/tag, or manual ref input.
-  - **Worktree removal selection**: entries display `context/branch · path`. Supports multi-select if we want to extend later; MVP removes one at a time.
+  - **Worktree removal selection**: entries display `name (branch) · path`. Supports multi-select if we want to extend later; MVP removes one at a time.
 - Users can bypass prompts entirely by supplying all positional arguments.
 
 ## 7. Git Operations & Edge Cases
@@ -67,7 +66,7 @@
   3. If new branch, create via `git worktree add <target_path> --checkout -b <branch> <start-point>`.
 - **Listing**: parse `git worktree list --porcelain` from admin clone to stay consistent. Each entry includes `worktree`, `branch`, `locked`, `prunable` fields.
 - **Removal**: call `git worktree remove [--force] <path>` in admin clone context, then delete empty directories left behind in `GIT_WORKTREE_ROOT`.
-- **Slug collisions**: if two branches map to the same slug (e.g., `feature/foo` and `feature__foo`), warn user and refuse creation unless they rename branch or supply custom directory override (future enhancement).
+- **Slug collisions**: if two worktree names map to the same slug (e.g., `feature/foo` and `feature__foo`), warn the user and refuse creation unless they choose a different name.
 
 ## 8. Error Handling & Messaging
 - Centralized error classes: `MissingEnvError`, `GitError`, `ValidationError`, `UserAbort`.
@@ -89,7 +88,7 @@
 - Tests: use `pytest` with fixtures mocking subprocess responses; Typer commands covered via `CliRunner`.
 
 ## 10. Future Extensions (Non-blocking)
-- Configurable context lists via dotfile or env var.
+- Optional tagging or grouping metadata stored alongside worktree directories.
 - Optional integration with external fuzzy tools (`fzf`) for users who prefer native binaries.
 - Multi-select removal and batch add flows.
 - Metrics/logging hooks, e.g., `--dry-run` preview mode.
