@@ -35,7 +35,12 @@ from .worktrees import (
 )
 from ._version import __version__
 
-app = typer.Typer(add_completion=False, no_args_is_help=True, rich_markup_mode="rich")
+app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @dataclass(slots=True)
