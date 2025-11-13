@@ -71,6 +71,39 @@ def prompt_branch_selection(branches: Sequence[BranchChoice]) -> BranchChoice:
     raise UserAbort("Invalid branch selection.")
 
 
+def prompt_start_point_selection(
+    branches: Sequence[BranchChoice],
+    manual_label: str = "Enter ref manually…",
+) -> str | None:
+    labels = [b.label for b in branches]
+    default_label = next((b.label for b in branches if b.is_default), None)
+    if not default_label:
+        if labels:
+            default_label = labels[0]
+        else:
+            default_label = manual_label
+    selection = prompt_list("Start point", labels + [manual_label], default_label)
+    if selection == manual_label:
+        return None
+    for branch in branches:
+        if branch.label == selection:
+            return branch.value
+    raise UserAbort("Invalid start point selection.")
+
+
+def prompt_branch_mode() -> str:
+    options = [
+        ("existing", "Use existing branch"),
+        ("new", "Create new branch"),
+    ]
+    labels = [label for _, label in options]
+    selected = prompt_list("Branch workflow", labels, default=labels[0])
+    for value, label in options:
+        if label == selected:
+            return value
+    raise UserAbort("Invalid branch workflow selection.")
+
+
 def prompt_worktree_selection(options: Sequence[str]) -> str:
     return prompt_list("Select worktree", options)
 
@@ -79,6 +112,8 @@ __all__ = [
     "prompt_text",
     "prompt_list",
     "prompt_branch_selection",
+    "prompt_start_point_selection",
     "prompt_worktree_selection",
+    "prompt_branch_mode",
     "BranchChoice",
 ]

@@ -17,7 +17,9 @@ from .config import (
 from .exceptions import GitWorktreeError, UserAbort, ValidationError
 from .interactive import (
     BranchChoice,
+    prompt_branch_mode,
     prompt_branch_selection,
+    prompt_start_point_selection,
     prompt_text,
     prompt_worktree_selection,
 )
@@ -205,24 +207,38 @@ def _resolve_branch_inputs(
     if branch:
         return branch, start_point, track
 
-    summary = load_branch_summary(state.paths)
-    choices = _build_branch_choices(state, summary)
-    selection = prompt_branch_selection(choices)
-    if selection.value == "__create__":
-        new_branch = prompt_text("New branch name", default=state.repo_ctx.default_branch).strip()
-        if not new_branch:
-            raise ValidationError("Branch name cannot be empty.")
-        start = start_point or prompt_text(
-            "Start point (branch, tag, or commit)",
-            default=state.repo_ctx.default_branch,
-        ).strip()
-        if not start:
-            raise ValidationError("Start point cannot be empty.")
-        return new_branch, start, track
+    mode = prompt_branch_mode()
 
-    resolved_start = start_point or selection.start_ref
-    resolved_track = track or (selection.start_ref if selection.start_ref and selection.start_ref.startswith("origin/") else None)
-    return selection.value, resolved_start, resolved_track
+    if mode == "existing":
+        summary = load_branch_summary(state.paths)
+        choices = _build_branch_choices(state, summary)
+        if not choices:
+            raise ValidationError("No branches available; create a new branch first.")
+        selection = prompt_branch_selection(choices)
+        resolved_start = start_point or selection.start_ref
+        resolved_track = track or (
+            selection.start_ref if selection.start_ref and selection.start_ref.startswith("origin/") else None
+        )
+        return selection.value, resolved_start, resolved_track
+
+    summary = load_branch_summary(state.paths)
+    new_branch = prompt_text("New branch name", default=state.repo_ctx.default_branch).strip()
+    if not new_branch:
+        raise ValidationError("Branch name cannot be empty.")
+    start = start_point
+    if not start:
+        start_choices = _build_start_point_choices(state, summary)
+        selected_start = prompt_start_point_selection(start_choices)
+        if selected_start is None:
+            start = prompt_text(
+                "Start point (branch, tag, or commit)",
+                default=state.repo_ctx.default_branch,
+            ).strip()
+        else:
+            start = selected_start
+    if not start:
+        raise ValidationError("Start point cannot be empty.")
+    return new_branch, start, track
 
 
 def _build_branch_choices(state: AppState, summary: dict[str, list[str]]) -> list[BranchChoice]:
@@ -250,7 +266,34 @@ def _build_branch_choices(state: AppState, summary: dict[str, list[str]]) -> lis
                 start_ref=remote,
             )
         )
-    choices.append(BranchChoice(label="Create new branch…", value="__create__"))
+    if choices and not any(choice.is_default for choice in choices):
+        choices[0].is_default = True
+    return choices
+
+
+def _build_start_point_choices(state: AppState, summary: dict[str, list[str]]) -> list[BranchChoice]:
+    choices: list[BranchChoice] = []
+    local_branches = summary.get("local", [])
+    remote_branches = summary.get("remote", [])
+    if state.repo_ctx.default_branch in local_branches:
+        choices.append(
+            BranchChoice(
+                label=f"{state.repo_ctx.default_branch} · local (default)",
+                value=state.repo_ctx.default_branch,
+                is_default=True,
+            )
+        )
+    for branch in local_branches:
+        if branch == state.repo_ctx.default_branch:
+            continue
+        choices.append(BranchChoice(label=f"{branch} · local", value=branch))
+    for remote in remote_branches:
+        choices.append(
+            BranchChoice(
+                label=f"{remote} · remote",
+                value=remote,
+            )
+        )
     if choices and not any(choice.is_default for choice in choices):
         choices[0].is_default = True
     return choices
