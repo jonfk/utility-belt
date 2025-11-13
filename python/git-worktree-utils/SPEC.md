@@ -1,7 +1,7 @@
-# Git Smart Worktree — Functional Specification
+# Git Worktree Utils — Functional Specification
 
 ## 1. Purpose & Scope
-- Build a Python CLI (`git-smart-worktree`) that standardizes how git worktrees are created, listed, and removed for any repository based solely on generic git metadata.
+- Build a Python CLI (`git-worktree-utils`) that standardizes how git worktrees are created, listed, and removed for any repository based solely on generic git metadata.
 - Focus on managing a mirrored "admin" clone plus organized worktree directories under user-defined roots, enforcing the layout described in `README.md`.
 - Out of scope: host-specific API integrations (e.g., GitHub REST/GraphQL), PR automation, and advanced config stores beyond environment variables and hard-coded defaults.
 
@@ -31,7 +31,7 @@
 - Git CLI is invoked via subprocess; no additional VCS libraries required.
 
 ## 5. CLI Surface
-- Root command: `git-smart-worktree`.
+- Root command: `git-worktree-utils`.
 - **Global options**: `--repo PATH`, `--verbose` (short version `-v`), `--version`.
 - **Commands**:
   - `ls [--json]`

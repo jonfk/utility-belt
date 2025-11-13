@@ -9,3 +9,6 @@ dependencies = [
     "rich>=14.2.0",
     "typer>=0.20.0",
 ]
+
+[project.scripts]
+git-smart-worktree = "git_smart_worktree.cli:app"

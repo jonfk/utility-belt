@@ -21,3 +21,28 @@ I want the following functionality:
     - worktree-name: Arbitrary label for the directory that will be created under the repository-scoped worktree root. It must be unique and filesystem safe.
     - branch: the branch to checkout or create. The default branch main/master should be at the top of the list.
     - from: the starting point of a new branch if created. Can be omitted if checking out an existing branch. If empty or omitted on creating a new branch, it should be the default branch (main/master). This can also be a selector from existing branches.
+
+## Quick start
+
+```bash
+export GIT_WORKTREE_ADMIN_ROOT=~/worktree-admin
+export GIT_WORKTREE_ROOT=~/worktrees
+
+# Install dependencies (uv, pip, etc.)
+pip install -e .
+
+# Explore commands
+git-worktree-utils --help
+```
+
+Run the CLI inside any git repository. Use `--repo /path/to/repo` to operate on another project without changing directories.
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `git-worktree-utils ls [--json]` | Lists worktrees for the detected repo using the admin clone (table or JSON). |
+| `git-worktree-utils add [WORKTREE_NAME] [BRANCH] [--from REF] [--track REMOTE]` | Adds a worktree. Missing arguments trigger interactive prompts for name/branch/start. |
+| `git-worktree-utils rm [PATH] [--force] [--select]` | Removes a worktree by path or via an interactive selector that lists existing entries. |
+
+Both `GIT_WORKTREE_ADMIN_ROOT` and `GIT_WORKTREE_ROOT` must point to writable directories. Admin clones live at `GIT_WORKTREE_ADMIN_ROOT/<host>/<owner>/<repo>` and worktrees at `GIT_WORKTREE_ROOT/<host>/<owner>/<repo>/<worktree-name>`.

@@ -1,8 +1,8 @@
-"""Entry point shim for `python -m git_smart_worktree`."""
+"""Module entrypoint for `python -m git_smart_worktree`."""
 
 from __future__ import annotations
 
-from git_smart_worktree.cli import app
+from .cli import app
 
 
 def main() -> None:
