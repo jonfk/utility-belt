@@ -25,14 +25,14 @@
 ## 4. Dependencies & Tooling
 - Python ≥ 3.13 (per `pyproject.toml`).
 - Libraries:
-  - `typer[all]` (CLI ergonomics, help text, rich output). 
+  - `typer` (CLI ergonomics, help text, rich output). 
   - `InquirerPy` for interactive prompts with built-in fuzzy search; optional fallback to non-interactive mode when all arguments supplied.
   - `rich` (optional) for table output and colored messaging.
 - Git CLI is invoked via subprocess; no additional VCS libraries required.
 
 ## 5. CLI Surface
 - Root command: `git-smart-worktree`.
-- **Global options**: `--repo PATH`, `--verbose`, `--version`.
+- **Global options**: `--repo PATH`, `--verbose` (short version `-v`), `--version`.
 - **Commands**:
   - `ls [--json]`
     - Lists known worktrees for the resolved repo. Default view: table with columns `name`, `branch`, `path`, `status`.
