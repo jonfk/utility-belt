@@ -23,11 +23,14 @@ class WorktreeService:
         return (self.paths.admin_repo / ".git").exists()
 
     def ensure_admin_repo(self) -> Path:
+        admin_repo = self.paths.admin_repo
         if self.admin_exists():
-            return self.paths.admin_repo
-        ensure_directory(self.paths.admin_repo.parent)
-        git.clone_no_checkout(self.context.remote_url, self.paths.admin_repo)
-        return self.paths.admin_repo
+            self._ensure_detached_head(admin_repo)
+            return admin_repo
+        ensure_directory(admin_repo.parent)
+        git.clone_no_checkout(self.context.remote_url, admin_repo)
+        self._ensure_detached_head(admin_repo)
+        return admin_repo
 
     def list_worktrees(self, include_all: bool = False) -> list[WorktreeEntry]:
         entries: dict[Path, WorktreeEntry] = {}
@@ -78,6 +81,13 @@ class WorktreeService:
         admin_repo = self.ensure_admin_repo()
         ensure_directory(target_dir.parent)
         git.fetch(admin_repo)
+        branch_usage = self.branches_in_use()
+        if branch in branch_usage:
+            locations = ", ".join(str(path) for path in branch_usage[branch])
+            raise ValidationError(
+                f"Branch '{branch}' is already attached to worktree(s): {locations}. "
+                "Detach or remove the existing worktree before continuing."
+            )
         branch_exists = git.branch_exists(admin_repo, branch)
         remote_exists = git.remote_branch_exists(admin_repo, branch)
         if branch_exists:
@@ -104,6 +114,17 @@ class WorktreeService:
         repo_path = self.paths.admin_repo if self.admin_exists() else self.context.repo_path
         return git.list_branches(repo_path, include_remote=True)
 
+    def branches_in_use(self) -> dict[str, list[Path]]:
+        usage: dict[str, list[Path]] = {}
+        if not self.admin_exists():
+            return usage
+        for raw in git.worktree_list(self.paths.admin_repo):
+            branch = raw.get("branch")
+            path = raw.get("path")
+            if branch and path:
+                usage.setdefault(branch, []).append(path)
+        return usage
+
     def _target_path(self, context_name: str, branch: str) -> Path:
         slug = slugify_branch(branch)
         return self.paths.worktree_repo_root / context_name / slug
@@ -114,6 +135,9 @@ class WorktreeService:
             raise ValidationError("Context name cannot be empty.")
         if "/" in value or "\0" in value:
             raise ValidationError("Context name cannot contain '/' or null characters.")
+
+    def _ensure_detached_head(self, repo: Path) -> None:
+        git.ensure_detached_head(repo)
 
 
 def derive_context(path: Path, repo_root: Path) -> tuple[str | None, str | None]:

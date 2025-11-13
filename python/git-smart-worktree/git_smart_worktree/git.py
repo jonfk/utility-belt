@@ -162,3 +162,19 @@ def worktree_remove(path: Path, target: Path, force: bool = False) -> None:
         args.append("--force")
     args.append(str(target))
     run_git(args, cwd=path)
+
+
+def head_ref(path: Path) -> str | None:
+    proc = run_git(["symbolic-ref", "-q", "HEAD"], cwd=path, raise_on_error=False)
+    if proc.returncode == 0:
+        return proc.stdout.strip()
+    return None
+
+
+def ensure_detached_head(path: Path) -> None:
+    if head_ref(path) is None:
+        return
+    commit = run_git(["rev-parse", "HEAD"], cwd=path).stdout.strip()
+    if not commit:
+        return
+    run_git(["update-ref", "--no-deref", "HEAD", commit], cwd=path)

@@ -139,9 +139,20 @@ def _prompt_context(service: WorktreeService) -> str:
 
 def _prompt_branch(service: WorktreeService, default_branch: str) -> str:
     branches = service.branch_suggestions()
-    highlight = [default_branch]
-    choices = build_choices(branches, highlight=highlight)
+    branch_usage = service.branches_in_use()
+    available = [branch for branch in branches if branch not in branch_usage]
+    highlight = [default_branch] if default_branch in available else []
+    choices = build_choices(available, highlight=highlight)
+    if not choices:
+        console.print("No available branches detected. Create a new branch or provide one manually.")
     choices.append(Choice(value="__new__", name="Create new branch…"))
+    if branch_usage:
+        console.print("")
+        console.print("Branches already in use (not selectable):")
+        for branch in sorted(branch_usage):
+            locations = ", ".join(str(path) for path in branch_usage[branch])
+            console.print(f"  • {branch}: {locations}")
+        console.print("")
     selection = fuzzy_select("Select branch", choices)
     if selection == "__new__":
         return text_input("Branch name")
