@@ -47,6 +47,14 @@ class AppState:
     verbose: bool = False
 
 
+@dataclass(slots=True)
+class BranchResolution:
+    branch: str
+    start_point: str | None
+    track: str | None
+    no_track_checkout: bool = False
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"git-worktree-utils {__version__}")
@@ -131,7 +139,7 @@ def add(
 
     try:
         resolved_name = worktree_name or _prompt_worktree_name(state)
-        resolved_branch, resolved_from, resolved_track = _resolve_branch_inputs(
+        resolution = _resolve_branch_inputs(
             state,
             branch=branch,
             start_point=from_ref,
@@ -145,9 +153,10 @@ def add(
         state.paths,
         state.repo_ctx,
         worktree_name=resolved_name,
-        branch=resolved_branch,
-        start_point=resolved_from,
-        track=resolved_track,
+        branch=resolution.branch,
+        start_point=resolution.start_point,
+        track=resolution.track,
+        no_track_checkout=resolution.no_track_checkout,
         console=state.console,
     )
     state.console.print(f"[green]Worktree created at {target}[/green]")
@@ -203,9 +212,9 @@ def _resolve_branch_inputs(
     branch: Optional[str],
     start_point: Optional[str],
     track: Optional[str],
-) -> tuple[str, Optional[str], Optional[str]]:
+) -> BranchResolution:
     if branch:
-        return branch, start_point, track
+        return BranchResolution(branch=branch, start_point=start_point, track=track)
 
     mode = prompt_branch_mode()
 
@@ -219,7 +228,11 @@ def _resolve_branch_inputs(
         resolved_track = track or (
             selection.start_ref if selection.start_ref and selection.start_ref.startswith("origin/") else None
         )
-        return selection.value, resolved_start, resolved_track
+        return BranchResolution(
+            branch=selection.value,
+            start_point=resolved_start,
+            track=resolved_track,
+        )
 
     summary = load_branch_summary(state.paths)
     new_branch = prompt_text("New branch name", default=state.repo_ctx.default_branch).strip()
@@ -238,7 +251,13 @@ def _resolve_branch_inputs(
             start = selected_start
     if not start:
         raise ValidationError("Start point cannot be empty.")
-    return new_branch, start, track
+    no_track_checkout = not track and start in summary.get("remote", [])
+    return BranchResolution(
+        branch=new_branch,
+        start_point=start,
+        track=track,
+        no_track_checkout=no_track_checkout,
+    )
 
 
 def _build_branch_choices(state: AppState, summary: dict[str, list[str]]) -> list[BranchChoice]:

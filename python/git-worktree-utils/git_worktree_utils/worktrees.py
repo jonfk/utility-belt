@@ -72,6 +72,7 @@ def add_worktree(
     branch: str,
     start_point: str | None,
     track: str | None,
+    no_track_checkout: bool = False,
     console: Console,
 ) -> Path:
     slug = slugify_worktree_name(worktree_name)
@@ -92,7 +93,10 @@ def add_worktree(
         if remote_branch_exists:
             inferred_start = f"origin/{branch}"
         start = start_point or inferred_start or repo_ctx.default_branch
-        worktree_args.extend(["-b", branch, start])
+        worktree_args.extend(["-b", branch])
+        if no_track_checkout:
+            worktree_args.append("--no-track")
+        worktree_args.append(start)
 
     with console.status(f"Adding worktree '{slug}'…"):
         run_git(worktree_args, cwd=paths.admin_path)
