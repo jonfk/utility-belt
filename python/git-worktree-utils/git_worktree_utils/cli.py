@@ -138,17 +138,46 @@ def add(
         "--track",
         help="Set upstream for the branch (e.g., origin/main).",
     ),
+    interactive: Optional[bool] = typer.Option(
+        None,
+        "--interactive/--no-interactive",
+        help=(
+            "Control interactive prompts. Defaults to auto: prompts are shown when required inputs are missing."
+        ),
+    ),
 ) -> None:
     state = _require_state(ctx)
     ensure_admin_ready(state.paths, state.repo_ctx, state.console)
 
     try:
-        resolved_name = worktree_name or _prompt_worktree_name(state)
+        missing_required: list[str] = []
+        if not worktree_name:
+            missing_required.append("worktree name")
+        if not branch:
+            missing_required.append("branch")
+
+        if interactive is True:
+            interactive_mode = True
+        elif interactive is False:
+            interactive_mode = False
+        else:
+            interactive_mode = bool(missing_required)
+
+        if missing_required and not interactive_mode:
+            missing_display = ", ".join(missing_required)
+            raise ValidationError(
+                f"Missing required arguments: {missing_display}. Provide them or rerun with --interactive."
+            )
+
+        resolved_name = worktree_name
+        if interactive_mode and not resolved_name:
+            resolved_name = _prompt_worktree_name(state)
         resolution = _resolve_branch_inputs(
             state,
             branch=branch,
             start_point=from_ref,
             track=track,
+            interactive=interactive_mode,
         )
     except (ValidationError, UserAbort) as exc:
         state.console.print(f"[yellow]{exc}[/yellow]")
@@ -204,7 +233,7 @@ def rm(
 
 
 def _prompt_worktree_name(state: AppState) -> str:
-    name = prompt_text("Worktree name", default=state.repo_ctx.default_branch)
+    name = prompt_text("Worktree name")
     name = name.strip()
     if not name:
         raise ValidationError("Worktree name cannot be empty.")
@@ -217,9 +246,13 @@ def _resolve_branch_inputs(
     branch: Optional[str],
     start_point: Optional[str],
     track: Optional[str],
+    interactive: bool,
 ) -> BranchResolution:
     if branch:
         return BranchResolution(branch=branch, start_point=start_point, track=track)
+
+    if not interactive:
+        raise ValidationError("Branch is required when running non-interactively. Use --interactive to prompt.")
 
     mode = prompt_branch_mode()
 
@@ -240,7 +273,7 @@ def _resolve_branch_inputs(
         )
 
     summary = load_branch_summary(state.paths)
-    new_branch = prompt_text("New branch name", default=state.repo_ctx.default_branch).strip()
+    new_branch = prompt_text("New branch name").strip()
     if not new_branch:
         raise ValidationError("Branch name cannot be empty.")
     start = start_point
@@ -250,7 +283,6 @@ def _resolve_branch_inputs(
         if selected_start is None:
             start = prompt_text(
                 "Start point (branch, tag, or commit)",
-                default=state.repo_ctx.default_branch,
             ).strip()
         else:
             start = selected_start

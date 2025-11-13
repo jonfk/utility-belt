@@ -42,7 +42,7 @@ Run the CLI inside any git repository. Use `--repo /path/to/repo` to operate on 
 | Command | Description |
 | --- | --- |
 | `git-worktree-utils ls [--json]` | Lists worktrees for the detected repo using the admin clone (table or JSON). |
-| `git-worktree-utils add [WORKTREE_NAME] [BRANCH] [--from REF] [--track REMOTE]` | Adds a worktree. Missing arguments trigger interactive prompts for name/branch/start. |
+| `git-worktree-utils add [WORKTREE_NAME] [BRANCH] [--from REF] [--track REMOTE] [--interactive/--no-interactive]` | Adds a worktree. Prompts open automatically when required args are omitted; `--interactive` forces prompts, `--no-interactive` enforces explicit values. |
 | `git-worktree-utils rm [PATH] [--force] [--select]` | Removes a worktree by path or via an interactive selector that lists existing entries. |
 
 Both `GIT_WORKTREE_ADMIN_ROOT` and `GIT_WORKTREE_ROOT` must point to writable directories. Admin clones live at `GIT_WORKTREE_ADMIN_ROOT/<host>/<owner>/<repo>` and worktrees at `GIT_WORKTREE_ROOT/<host>/<owner>/<repo>/<worktree-name>`.

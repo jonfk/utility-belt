@@ -33,8 +33,12 @@ def _ensure_choices(choices: Sequence[str]) -> list[str]:
 def prompt_text(message: str, default: str | None = None) -> str:
     try:
         if _HAS_INQUIRER:
-            return inquirer.text(message=message, default=default).execute()
-        raw = input(f"{message} [{default or ''}]: ")
+            prompt_kwargs = {"message": message}
+            if default is not None:
+                prompt_kwargs["default"] = default
+            return inquirer.text(**prompt_kwargs).execute()
+        suffix = f" [{default}]" if default else ""
+        raw = input(f"{message}{suffix}: ")
         return raw.strip() or (default or "")
     except KeyboardInterrupt as exc:  # pragma: no cover - user cancel
         raise UserAbort("User cancelled the prompt.") from exc
