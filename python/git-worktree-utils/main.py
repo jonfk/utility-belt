@@ -1,8 +1,8 @@
-"""Entry point shim for `python -m git_smart_worktree`."""
+"""Entry point shim for `python -m git_worktree_utils`."""
 
 from __future__ import annotations
 
-from git_smart_worktree.cli import app
+from git_worktree_utils.cli import app
 
 
 def main() -> None:

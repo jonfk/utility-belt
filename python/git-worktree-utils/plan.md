@@ -1,6 +1,6 @@
 Proposed Structure
 
-- git_smart_worktree/__init__.py
+- git_worktree_utils/__init__.py
 - cli.py: Typer app registering ls, add, rm, global options.
 - config.py: env validation, repo detection (rev-parse, remote get-url), default branch resolution, path builders, slugify helper.
 - git.py: thin wrappers for subprocess git calls, porcelain parsing, shared run_git() with admin clone context handling.

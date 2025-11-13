@@ -1,4 +1,4 @@
-"""Custom error hierarchy for git-smart-worktree."""
+"""Custom error hierarchy for git-worktree-utils."""
 
 from __future__ import annotations
 

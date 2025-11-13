@@ -1,4 +1,4 @@
-"""git-smart-worktree package."""
+"""git-worktree-utils package."""
 
 from __future__ import annotations
 

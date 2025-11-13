@@ -1,4 +1,4 @@
-"""Typer CLI entrypoint for git-smart-worktree."""
+"""Typer CLI entrypoint for git-worktree-utils."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class AppState:
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"git-smart-worktree {__version__}")
+        typer.echo(f"git-worktree-utils {__version__}")
         raise typer.Exit()
 
 
@@ -68,7 +68,7 @@ def main(
         "--version",
         callback=_version_callback,
         is_eager=True,
-        help="Show the git-smart-worktree version and exit.",
+        help="Show the git-worktree-utils version and exit.",
     ),
 ) -> None:
     _ = version  # handled via callback

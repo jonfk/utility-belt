@@ -1,4 +1,4 @@
-"""Module entrypoint for `python -m git_smart_worktree`."""
+"""Module entrypoint for `python -m git_worktree_utils`."""
 
 from __future__ import annotations
 

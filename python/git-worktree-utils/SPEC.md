@@ -82,7 +82,7 @@
 - Non-zero exit codes map to failure categories (1=usage/config, 2=git failure, 130=user aborted).
 
 ## 9. Architecture Overview
-- Package layout (under `git_smart_worktree/`):
+- Package layout (under `git_worktree_utils/`):
   - `cli.py`: Typer entrypoint wiring subcommands.
   - `config.py`: env validation, repo context resolution, path builders.
   - `git.py`: subprocess helpers wrapping git commands and parsing outputs.

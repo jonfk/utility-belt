@@ -11,4 +11,4 @@ dependencies = [
 ]
 
 [project.scripts]
-git-smart-worktree = "git_smart_worktree.cli:app"
+git-worktree-utils = "git_worktree_utils.cli:app"
