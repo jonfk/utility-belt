@@ -6,6 +6,10 @@ default:
 install-git-smart-commit:
     cd python/git-smart-commit && uv tool install --reinstall .
 
+# Install git-smart-worktree using uv
+install-git-smart-worktree:
+    cd python/git-smart-worktree && uv tool install --reinstall .
+
 # Install prune-openapi using uv
 install-prune-openapi:
     cd python/prune-openapi && uv tool install --reinstall .
