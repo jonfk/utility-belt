@@ -34,9 +34,9 @@
 - Root command: `git-smart-worktree`.
 - **Global options**: `--repo PATH`, `--verbose`, `--version`.
 - **Commands**:
-  - `ls [--all] [--json]`
+  - `ls [--json]`
     - Lists known worktrees for the resolved repo. Default view: table with columns `name`, `branch`, `path`, `status`.
-    - `--all` scans filesystem directories even if git no longer tracks them; otherwise rely on `git worktree list --porcelain`.
+    - Uses `git worktree list --porcelain`.
     - `--json` outputs machine-readable JSON array.
   - `add [WORKTREE_NAME] [BRANCH] [--from START] [--track REMOTE]`
     - Adds a worktree rooted at `<worktree-name>`; arguments optional.
@@ -55,11 +55,13 @@
   - **Starting point selection** (only when creating a new branch): options include default branch, any existing branch/tag, or manual ref input.
   - **Worktree removal selection**: entries display `name (branch) · path`. Supports multi-select if we want to extend later; MVP removes one at a time.
 - Users can bypass prompts entirely by supplying all positional arguments.
+- When an operating is running and expected to take a while such as cloning or any other long running operation, it should show a loading indicator to the user.
 
 ## 7. Git Operations & Edge Cases
 - **Admin clone bootstrap**:
   - If missing, run `git clone --no-checkout <origin> <admin_path>`.
   - Subsequent commands use `--git-dir <admin_path>/.git` and `--work-tree <admin_path>` to keep operations scoped to the admin clone when adding/removing worktrees.
+  - Ensure the admin clone is in detach HEAD so that it isn't using any of the branches of the repo and therefore preventing a worktree from using it.
 - **Worktree creation flow**:
   1. Ensure admin clone exists and fetch latest refs (`git fetch origin --prune`).
   2. If target branch exists (local or remote), use `git worktree add <target_path> <branch>`.
