@@ -170,9 +170,26 @@ def _prompt_start_point(service: WorktreeService, default_branch: str) -> str:
 
 
 def _prompt_worktree(entries: list[WorktreeEntry]) -> WorktreeEntry:
-    choices = [Choice(value=entry, name=f"{entry.display_name} · {entry.path}") for entry in entries]
+    choices, lookup = _build_worktree_choice_data(entries)
     selection = fuzzy_select("Select worktree", choices)
-    return selection
+    try:
+        return lookup[str(selection)]
+    except KeyError as exc:
+        raise ValidationError("Selected worktree could not be resolved.") from exc
+
+
+def _build_worktree_choice_data(entries: list[WorktreeEntry]) -> tuple[list[Choice], dict[str, WorktreeEntry]]:
+    """Return the choice list used for prompts plus a lookup keyed by path."""
+
+    lookup: dict[str, WorktreeEntry] = {}
+    path_choices: list[Choice] = []
+    for entry in entries:
+        key = str(entry.path)
+        if key in lookup:
+            raise ValidationError(f"Duplicate worktree path detected: {key}")
+        lookup[key] = entry
+        path_choices.append(Choice(value=key, name=f"{entry.display_name} · {entry.path}"))
+    return path_choices, lookup
 
 
 def _fail(message: str, code: int = 1) -> None:
