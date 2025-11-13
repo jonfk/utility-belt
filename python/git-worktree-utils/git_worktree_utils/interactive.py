@@ -61,10 +61,25 @@ def prompt_list(message: str, choices: Sequence[str], default: str | None = None
         raise UserAbort("User cancelled the prompt.") from exc
 
 
+def prompt_fuzzy_list(message: str, choices: Sequence[str], default: str | None = None) -> str:
+    _ensure_choices(choices)
+    try:
+        if _HAS_INQUIRER and hasattr(inquirer, "fuzzy"):
+            # Avoid seeding the search box so the full list remains visible initially.
+            return inquirer.fuzzy(
+                message=message,
+                choices=list(choices),
+                qmark="›",
+            ).execute()
+        return prompt_list(message, choices, default)
+    except KeyboardInterrupt as exc:  # pragma: no cover - user cancel
+        raise UserAbort("User cancelled the prompt.") from exc
+
+
 def prompt_branch_selection(branches: Sequence[BranchChoice]) -> BranchChoice:
     labeled = [b.label for b in branches]
     default_label = next((b.label for b in branches if b.is_default), None)
-    selected_label = prompt_list("Select branch", labeled, default_label)
+    selected_label = prompt_fuzzy_list("Select branch", labeled, default_label)
     for branch in branches:
         if branch.label == selected_label:
             return branch
@@ -82,7 +97,7 @@ def prompt_start_point_selection(
             default_label = labels[0]
         else:
             default_label = manual_label
-    selection = prompt_list("Start point", labels + [manual_label], default_label)
+    selection = prompt_fuzzy_list("Start point", labels + [manual_label], default_label)
     if selection == manual_label:
         return None
     for branch in branches:
@@ -111,6 +126,7 @@ def prompt_worktree_selection(options: Sequence[str]) -> str:
 __all__ = [
     "prompt_text",
     "prompt_list",
+    "prompt_fuzzy_list",
     "prompt_branch_selection",
     "prompt_start_point_selection",
     "prompt_worktree_selection",
