@@ -1,6 +1,7 @@
 mod cleaner;
 mod copier;
 mod db;
+mod existence_checker;
 mod progress;
 mod scanner;
 mod types;
@@ -11,6 +12,7 @@ use cleaner::FileCleaner;
 use copier::FileCopier;
 use db::Database;
 use error_stack::{Result, ResultExt};
+use existence_checker::ExistenceChecker;
 use progress::ProgressManager;
 use scanner::FileScanner;
 use types::AppError;
@@ -62,6 +64,11 @@ enum Commands {
         #[arg(long)]
         detailed: bool,
     },
+    /// Check if a file or any files in a directory already exist in the hash database
+    CheckExist {
+        /// File or directory path to check
+        path: Utf8PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -112,6 +119,21 @@ async fn main() -> Result<(), AppError> {
         Commands::Status { detailed } => {
             let cleaner = FileCleaner::new();
             cleaner.show_status(&db, &multi, detailed).await?;
+        }
+        Commands::CheckExist { path } => {
+            println!("Running check-exist command for: {}", path);
+            let checker = ExistenceChecker::new(args.batch_size);
+            let result = checker
+                .check_path(&path, &db, &multi)
+                .await
+                .change_context(AppError::FileProcessing)?;
+
+            println!("\nCHECK-EXIST SUMMARY:");
+            println!("  Files checked: {}", result.files_checked);
+            println!("  Matches found: {}", result.matches_found);
+            if result.errors > 0 {
+                println!("  Errors: {}", result.errors);
+            }
         }
     }
 
