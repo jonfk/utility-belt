@@ -6,7 +6,7 @@
     - A nicer prompt to the user when choosing y/n to edit. Maybe a chooser that can be selected up and down, etc
     - A nicer way to show what model is being used than
 ```
-ℹ Using model: gemini-2.5-flash
+ℹ Using model: gemini-3-flash-preview
 ℹ Generating commit message for unstaged changes...
 ```
 

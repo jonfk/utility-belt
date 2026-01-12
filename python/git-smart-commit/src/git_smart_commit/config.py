@@ -6,7 +6,7 @@ from dataclasses import dataclass
 @dataclass
 class Config:
     """Application configuration."""
-    default_model: str = "gemini-2.5-flash"
+    default_model: str = "gemini-3-flash-preview"
     default_backend: str = "llm"  # Future: could be "litellm"
 
 

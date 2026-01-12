@@ -41,7 +41,7 @@ git-smart-commit/
 
 Single command, compatible flags with your zsh version:
 
-* `-m/--model TEXT` (default `gemini-2.5-flash`)
+* `-m/--model TEXT` (default `gemini-3-flash-preview`)
 * `--edit/--no-edit` (default `--edit`: open git editor with a template for multiline)
 * `--dry-run` (show what would happen; don’t stage/commit)
 * `--verbose` (extra logs)
@@ -193,7 +193,7 @@ Small, pure functions wrapping `subprocess.run`:
 * Ship v0 with `LlmCliClient` as default.
 * Add `LiteLlmClient` behind a flag (no behavior change).
 * Once stable, flip default → `LiteLlmClient`, keep CLI fallback with `--backend=llm`.
-* (Optional) Add model aliases mapping (e.g., your current `gemini-2.5-flash`) to LiteLLM provider syntax.
+* (Optional) Add model aliases mapping (e.g., your current `gemini-3-flash-preview`) to LiteLLM provider syntax.
 
 # 13) Small UX choices vs your zsh version
 
@@ -202,4 +202,3 @@ Small, pure functions wrapping `subprocess.run`:
   * Default to `--edit` so users can tweak in their git editor (mirrors your temp-file template behavior).
   * Provide `--dry-run` (show plan, don’t touch the repo) and `--no-edit` (apply directly).
 * No external `jq` dependency; JSON is parsed in-process.
-
