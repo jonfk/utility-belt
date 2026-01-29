@@ -28,3 +28,9 @@ install-sync-github-keys:
 install-organize-files-into-dirs-by-date:
     mkdir -p ~/.local/bin
     ln -sf $(pwd)/python/organize-files-into-dirs-by-date.py ~/.local/bin/organize-files-into-dirs-by-date
+
+# Install beautiful-mermaid CLI
+install-beautiful-mermaid:
+    cd ts/beautiful-mermaid && bun install && bun run build
+    mkdir -p ~/.local/bin
+    ln -sf $(pwd)/ts/beautiful-mermaid/dist/beautiful-mermaid ~/.local/bin/beautiful-mermaid
