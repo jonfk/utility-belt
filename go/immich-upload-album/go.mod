@@ -1,13 +1,13 @@
 module immich-upload-album
 
-go 1.20
+go 1.23.0
 
 require (
 	github.com/go-resty/resty/v2 v2.13.1
 	github.com/gphotosuploader/google-photos-api-client-go/v3 v3.0.5
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.8.1
-	golang.org/x/oauth2 v0.21.0
+	golang.org/x/oauth2 v0.27.0
 )
 
 require (
