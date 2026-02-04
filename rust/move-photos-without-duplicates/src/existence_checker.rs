@@ -81,6 +81,13 @@ impl ExistenceChecker {
 
         process_pb.finish_with_message("✓ Check complete");
 
+        if result.files_checked > 0
+            && result.errors == 0
+            && result.matches_found == result.files_checked
+        {
+            println!("\nAll files are already present in the hash database.");
+        }
+
         Ok(result)
     }
 
