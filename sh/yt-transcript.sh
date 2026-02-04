@@ -47,7 +47,7 @@ have() {
 trim() {
   local s="$1"
   # shellcheck disable=SC2001
-  s="$(echo "$s" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+  s="$(printf '%s' "$s" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
   printf '%s' "$s"
 }
 
@@ -148,7 +148,9 @@ download_subtitles() {
       ;;
   esac
 
-  if ! yt-dlp "${args[@]}" "$url"; then
+  # yt-dlp often logs progress to stdout. Since we capture this function's stdout
+  # to get the chosen .vtt path, force yt-dlp stdout to stderr.
+  if ! yt-dlp "${args[@]}" "$url" 1>&2; then
     return 2
   fi
 
@@ -184,55 +186,57 @@ write_markdown() {
     printf -- '---\n\n'
 
     awk '
-      BEGIN { in_header=1; in_note=0; cue=""; prev=""; first=1 }
-      function flush() {
-        if (cue == "") return
-        if (cue == prev) { cue=""; return }
-        if (!first) printf " "
-        printf "%s", cue
-        prev = cue
-        cue=""
-        first=0
+      BEGIN {
+        bom=sprintf("%c%c%c", 239, 187, 191)
+        in_note=0
+        in_block=0
+        in_header=0
+        prev_blank=0
+        prev_line=""
       }
       {
         line=$0
         sub(/\r$/, "", line)
-        stripped=line
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", stripped)
 
+        if (NR == 1) sub("^" bom, "", line)
+
+        if (line ~ /^WEBVTT/) { in_header=1; next }
         if (in_header) {
-          if (stripped == "") in_header=0
+          if (line == "") in_header=0
           next
         }
 
-        if (stripped ~ /^NOTE/) { in_note=1; next }
+        if (line ~ /^NOTE($| )/) { in_note=1; next }
         if (in_note) {
-          if (stripped == "") in_note=0
+          if (line == "") in_note=0
           next
         }
 
-        if (line ~ /-->/) { flush(); next }
-        if (stripped == "") { flush(); next }
-        if (cue == "" && stripped ~ /^[0-9]+$/) next
+        if (line ~ /^(STYLE|REGION)$/) { in_block=1; next }
+        if (in_block) {
+          if (line == "") in_block=0
+          next
+        }
 
-        gsub(/<[^>]+>/, "", line)
-        gsub(/&amp;/, "\\&", line)
-        gsub(/&lt;/, "<", line)
-        gsub(/&gt;/, ">", line)
-        gsub(/&quot;/, "\"", line)
-        gsub(/&#39;/, sprintf("%c", 39), line)
-        gsub(/&nbsp;/, " ", line)
-        gsub(/[[:space:]]+/, " ", line)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-        if (line == "") next
+        if (line ~ /-->/) next
 
-        if (cue != "") cue = cue " " line
-        else cue = line
+        gsub(/<[^>]*>/, "", line)
+        gsub(/[ \t]+/, " ", line)
+        sub(/^ /, "", line)
+        sub(/ $/, "", line)
+
+        if (line == "") {
+          if (prev_blank == 0) { print ""; prev_blank=1 }
+          next
+        }
+
+        if (line == prev_line) next
+
+        prev_line=line
+        prev_blank=0
+        print line
       }
-      END { flush(); print "" }
-    ' "$vtt_path" | fold -s -w 100
-
-    printf '\n'
+    ' "$vtt_path"
   } >"$md_path"
 }
 
@@ -309,8 +313,18 @@ main() {
     log "interrupted"
     exit 130
   }
+  on_hangup() {
+    log "hangup"
+    exit 129
+  }
+  on_terminate() {
+    log "terminated"
+    exit 143
+  }
   trap cleanup EXIT
   trap on_interrupt INT
+  trap on_hangup HUP
+  trap on_terminate TERM
 
   TMPDIR_CREATED="$(mktemp -d 2>/dev/null)" || die "failed to create temporary directory"
 
@@ -319,10 +333,20 @@ main() {
     die "yt-dlp failed while fetching video metadata"
   fi
 
-  local -a meta_lines=()
-  mapfile -t meta_lines <<<"$meta"
-  local video_id="${meta_lines[0]:-}"
-  local title="${meta_lines[1]:-}"
+  local video_id=""
+  local title=""
+  local line=""
+  local line_no=0
+  while IFS= read -r line; do
+    line_no=$((line_no + 1))
+    case "$line_no" in
+      1) video_id="$line" ;;
+      2)
+        title="$line"
+        break
+        ;;
+    esac
+  done <<<"$meta"
   [[ -n "$video_id" && -n "$title" ]] || die "failed to parse video metadata (is the URL valid?)"
 
   local slug
@@ -361,6 +385,7 @@ main() {
     captions_kind="official"
   else
     local rc=$?
+    vtt_path=""
     if [[ $rc -eq 2 ]]; then
       die "yt-dlp failed while fetching official subtitles"
     fi
@@ -372,12 +397,15 @@ main() {
       captions_kind="auto"
     else
       local rc=$?
+      vtt_path=""
       if [[ $rc -eq 2 ]]; then
         die "yt-dlp failed while fetching auto subtitles"
       fi
       die "no subtitles found for language '$lang'"
     fi
   fi
+
+  [[ -f "$vtt_path" ]] || die "subtitle file not found: $vtt_path"
 
   if [[ $want_subtitle -eq 1 ]]; then
     cp "$vtt_path" "$vtt_out"
