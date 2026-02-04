@@ -34,3 +34,9 @@ install-beautiful-mermaid:
     cd ts/beautiful-mermaid && bun install && bun run build
     mkdir -p ~/.local/bin
     ln -sf $(pwd)/ts/beautiful-mermaid/dist/beautiful-mermaid ~/.local/bin/beautiful-mermaid
+
+# Install utility-belt manager script
+install-utility-belt:
+    mkdir -p ~/.local/bin
+    chmod +x $(pwd)/sh/utility-belt.sh
+    ln -sf $(pwd)/sh/utility-belt.sh ~/.local/bin/utility-belt
