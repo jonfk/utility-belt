@@ -40,3 +40,9 @@ install-utility-belt:
     mkdir -p ~/.local/bin
     chmod +x $(pwd)/sh/utility-belt.sh
     ln -sf $(pwd)/sh/utility-belt.sh ~/.local/bin/utility-belt
+
+# Install yt-transcript script
+install-yt-transcript:
+    mkdir -p ~/.local/bin
+    chmod +x $(pwd)/sh/yt-transcript.sh
+    ln -sf $(pwd)/sh/yt-transcript.sh ~/.local/bin/yt-transcript
