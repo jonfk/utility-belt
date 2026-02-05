@@ -14,6 +14,10 @@ install-git-worktree-utils:
 install-prune-openapi:
     cd python/prune-openapi && uv tool install --reinstall .
 
+# Install git-smart-branch-delete using uv
+install-git-smart-branch-delete:
+    cd python/git-smart-branch-delete && uv tool install --reinstall .
+
 # Install start-ssh-proxy script
 install-start-ssh-proxy:
     mkdir -p ~/.local/bin

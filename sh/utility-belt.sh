@@ -3,6 +3,7 @@ set -euo pipefail
 
 UTILITY_BELT_PROGRAMS=(
   beautiful-mermaid
+  git-smart-branch-delete
   git-smart-commit
   git-worktree-utils
   organize-files-into-dirs-by-date
