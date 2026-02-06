@@ -48,5 +48,5 @@ install-utility-belt:
 # Install yt-transcript script
 install-yt-transcript:
     mkdir -p ~/.local/bin
-    chmod +x $(pwd)/sh/yt-transcript.sh
-    ln -sf $(pwd)/sh/yt-transcript.sh ~/.local/bin/yt-transcript
+    chmod +x $(pwd)/python/yt-transcript.py
+    ln -sf $(pwd)/python/yt-transcript.py ~/.local/bin/yt-transcript
