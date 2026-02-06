@@ -18,6 +18,10 @@ install-prune-openapi:
 install-git-smart-branch-delete:
     cd python/git-smart-branch-delete && uv tool install --reinstall .
 
+# Install git-smart-push using uv
+install-git-smart-push:
+    cd python/git-smart-push && uv tool install --reinstall .
+
 # Install start-ssh-proxy script
 install-start-ssh-proxy:
     mkdir -p ~/.local/bin
