@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -41,23 +42,48 @@ def run_command(
     command: Sequence[str],
     *,
     capture_output: bool = False,
+    log_command: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    command_list = list(command)
+    if log_command:
+        log(f"running command: {shlex.join(command_list)}")
+
     if capture_output:
         return subprocess.run(
-            list(command),
+            command_list,
             text=True,
             stdout=subprocess.PIPE,
-            stderr=sys.stderr,
+            stderr=subprocess.PIPE,
             check=False,
         )
 
     return subprocess.run(
-        list(command),
+        command_list,
         text=True,
         stdout=sys.stderr,
         stderr=sys.stderr,
         check=False,
     )
+
+
+def log_failed_command_output(
+    command: Sequence[str],
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    log(f"command failed (exit={result.returncode}): {shlex.join(list(command))}")
+
+    stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+    if not stdout and not stderr:
+        log("yt-dlp produced no output")
+        return
+
+    if stdout:
+        log("yt-dlp stdout:")
+        print(result.stdout, file=sys.stderr, end="" if result.stdout.endswith("\n") else "\n")
+    if stderr:
+        log("yt-dlp stderr:")
+        print(result.stderr, file=sys.stderr, end="" if result.stderr.endswith("\n") else "\n")
 
 
 def split_csv(raw: str) -> list[str]:
@@ -91,17 +117,20 @@ def parse_json_stdout(raw_stdout: str) -> Mapping[str, Any]:
 
 
 def fetch_video_info(url: str) -> Mapping[str, Any]:
+    command = [
+        "yt-dlp",
+        "--no-playlist",
+        "--skip-download",
+        "--dump-single-json",
+        url,
+    ]
     result = run_command(
-        [
-            "yt-dlp",
-            "--no-playlist",
-            "--skip-download",
-            "--dump-single-json",
-            url,
-        ],
+        command,
         capture_output=True,
+        log_command=True,
     )
     if result.returncode != 0:
+        log_failed_command_output(command, result)
         raise UserFacingError("yt-dlp failed while fetching video metadata")
     return parse_json_stdout(result.stdout)
 
@@ -187,8 +216,9 @@ def download_subtitles(kind: str, url: str, lang: str, directory: Path) -> tuple
         raise UserFacingError(f"internal: unknown subtitle kind: {kind}")
     args.append(url)
 
-    result = run_command(args)
+    result = run_command(args, capture_output=True, log_command=True)
     if result.returncode != 0:
+        log_failed_command_output(args, result)
         return 2, None
 
     candidates = sorted(path for path in directory.rglob("*.vtt") if path.is_file())
