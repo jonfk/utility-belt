@@ -95,10 +95,10 @@ async function writeToFile(outputPath: string, content: string): Promise<void> {
 const cli = cac('beautiful-mermaid')
 
 cli
-  .command('[...files]', 'Render Mermaid diagrams as SVG (default) or ASCII')
-  .option('-a, --ascii', 'Output ASCII instead of SVG')
-  .option('--svg', 'Force SVG output (default)')
-  .option('-o, --output <file>', 'Write output to a file')
+  .command('[...files]', 'Render Mermaid diagrams as SVG (default) or ASCII with explicit output defaults')
+  .option('-a, --ascii', 'Output ASCII instead of SVG (default: stdout; use --output to write a file)')
+  .option('--svg', 'Force SVG output (default: <input>.svg; stdin requires --output)')
+  .option('-o, --output <file>', 'Write output to a specific file (overrides format defaults)')
   .option('-t, --theme <name>', 'Apply a built-in theme for SVG output')
   .option('--themes', 'List available themes and exit')
   .action(async (files: string[] = [], options) => {
