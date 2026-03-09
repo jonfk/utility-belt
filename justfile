@@ -49,6 +49,14 @@ install-utility-belt:
     chmod +x $(pwd)/sh/utility-belt.sh
     ln -sf $(pwd)/sh/utility-belt.sh ~/.local/bin/utility-belt
 
+# Install codex-notify script and audio assets
+install-codex-notify:
+    mkdir -p ~/.local/bin
+    mkdir -p ~/.local/share/codex-notify
+    chmod +x $(pwd)/python/codex-notify.py
+    cp -f $(pwd)/python/codex-notify/* ~/.local/share/codex-notify/
+    ln -sf $(pwd)/python/codex-notify.py ~/.local/bin/codex-notify
+
 # Install yt-transcript script
 install-yt-transcript:
     mkdir -p ~/.local/bin
