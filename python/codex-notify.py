@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+DOTFILES_DIR = Path("/Users/jfokkan/dotfiles")
+APP_SOUND = DOTFILES_DIR / "scarlett-her-notify.wav"
+CLI_SOUND = DOTFILES_DIR / "aoe-wololo-notify.mp3"
+FALLBACK_SOUND = DOTFILES_DIR / "hal-9000-cant-do-that.wav"
+
+
+def read_notification() -> dict:
+    if len(sys.argv) < 2:
+        return {}
+
+    try:
+        payload = json.loads(sys.argv[1])
+    except json.JSONDecodeError:
+        return {}
+
+    return payload if isinstance(payload, dict) else {}
+
+
+def read_parent_command() -> str:
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(os.getppid()), "-o", "command="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+    return result.stdout.strip()
+
+
+def select_sound(parent_command: str) -> Path:
+    normalized = parent_command.lower()
+
+    if "/applications/codex.app/" in normalized:
+        return APP_SOUND
+
+    cli_markers = (
+        "/node_modules/@openai/codex/",
+        "/@openai/codex-",
+        "/vendor/aarch64-apple-darwin/codex/codex",
+        "/vendor/x86_64-apple-darwin/codex/codex",
+        "/bin/codex",
+    )
+    if any(marker in normalized for marker in cli_markers):
+        return CLI_SOUND
+
+    return FALLBACK_SOUND
+
+
+def play_sound(sound_path: Path) -> int:
+    if not sound_path.exists():
+        return 1
+
+    try:
+        subprocess.Popen(
+            ["afplay", str(sound_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return 1
+
+    return 0
+
+
+def main() -> int:
+    notification = read_notification()
+    if notification.get("type") not in {"", "agent-turn-complete"}:
+        return 0
+
+    parent_command = read_parent_command()
+    sound_path = select_sound(parent_command)
+    return play_sound(sound_path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
