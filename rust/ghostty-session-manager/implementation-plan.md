@@ -18,19 +18,23 @@ The following pieces are already implemented:
 - Table and JSON output for `ls`.
 - JSON state storage keyed by canonical project path.
 - Persisted MRU metadata with `last_accessed_at`.
+- Cached switch hints in persisted project state:
+  - `last_window_id`
+  - `last_seen_at`
+  - optional `last_window_name`
 - Joining live inventory with persisted state for display and switching.
+- Refreshing cached project records from live Ghostty inventory during `ls`.
 - Basic `ratatui` switcher with:
   - browse-only list
   - selection movement
   - confirm
   - cancel
 - Updating MRU state after a successful switch.
+- Updating cached window hints after a successful switch.
 - Debug timing output via `--debug`.
 
 The following pieces are not implemented yet:
 
-- Cached switch hints such as `last_window_id`, `last_seen_at`, or cached
-  display metadata.
 - Cached-first `switch` startup. `switch` still blocks on `query_windows`
   before opening the picker.
 - Typed search or ranking inside the switcher.
@@ -46,40 +50,56 @@ Today the command behavior is:
 - `ls`
   - queries Ghostty live
   - loads persisted state
-  - merges the two in memory
+  - refreshes cached project records from live windows
+  - persists state if the refreshed cache changed
+  - merges live and persisted data in memory
   - renders either table or JSON output
 - `switch`
   - queries Ghostty live before showing the UI
   - loads persisted state
   - opens a browse-only picker from the live window list
   - focuses the selected window
-  - records `last_accessed_at` for the selected project
+  - records `last_accessed_at` and cached window hints for the selected project
 
 That means the current implementation is still on the old query-first switch
 path. The next plan should move from that baseline toward the newer stale-first
 switch design.
 
-## Remaining Work
+## Completed Work
 
 ### Phase 1: Extend State For Cached Switching
 
-Add the minimum persisted fields needed for a fast switch path.
+Phase 1 is now implemented.
 
-- Extend project records with cached switch hints such as:
+- Project records now persist:
+  - `last_accessed_at`
   - `last_window_id`
   - `last_seen_at`
   - optional cached display metadata like `last_window_name`
 - Keep the state file keyed by canonical project path.
-- Add schema versioning or migration handling as needed so existing state files
-  do not break silently.
+- The state file still uses `version: 1`.
+- There is no migration path for older partial project records. Non-conforming
+  state files fail load with an error.
 - Continue treating persisted window ids as hints, not authoritative truth.
+- When multiple live windows share the same canonical project path, cache
+  refresh keeps the existing preferred `last_window_id` if it is still live.
+  Otherwise it falls back to the first live match in inventory order.
 
-Verification:
+Implementation note:
 
-- Unit tests cover loading old and new state shapes if a migration is needed.
+- New project records discovered during live refresh are currently bootstrapped
+  with `last_accessed_at = observed_at` because the persisted schema requires
+  `last_accessed_at` to be present.
+
+Verification already in code:
+
 - Unit tests cover saving and loading the extended project records.
-- Manual smoke test: switching and listing update the new cached fields in the
-  state file.
+- Unit tests cover failure on old incomplete project record shapes.
+- Unit tests cover duplicate-window preference retention and stale-preference
+  fallback.
+- `ls --json` exposes the richer persisted state fields.
+
+## Remaining Work
 
 ### Phase 2: Make `switch` Cached-First
 
@@ -196,13 +216,12 @@ Verification:
 
 The remaining work can be shipped in this order:
 
-1. Phase 1
-2. Phase 2
-3. Phase 3
-4. Phase 4
-5. Phase 5
-6. Phase 6
-7. Phase 7
+1. Phase 2
+2. Phase 3
+3. Phase 4
+4. Phase 5
+5. Phase 6
+6. Phase 7
 
 That order keeps the fast-path switch work ahead of the more subtle live
 reconciliation and cache-hygiene work.

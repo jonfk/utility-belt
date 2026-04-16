@@ -16,7 +16,21 @@ pub fn list_windows(
 ) -> Result<ListedWindows, Report<AppError>> {
     let span = info_span!("application.list_windows");
     let _enter = span.enter();
-    let (inventory, state) = load_inventory_and_state(ghostty, state_store)?;
+    let inventory = ghostty
+        .query_windows()
+        .change_context(AppError::Ghostty)
+        .attach("Failed to query Ghostty windows")?;
+    let mut state = state_store
+        .load()
+        .attach("Failed to load persisted Ghostty session state")?;
+    let observed_at = Timestamp::now();
+
+    if state.refresh_from_inventory(&inventory, observed_at)? {
+        state_store
+            .save(&state)
+            .attach("Failed to persist refreshed Ghostty session state after listing windows")?;
+    }
+
     Ok(ListedWindows::from_live_and_state(&inventory, &state))
 }
 
@@ -80,6 +94,7 @@ pub struct SwitchContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchWindow {
     pub window_id: String,
+    pub window_name: Option<String>,
     pub project_path: Option<PathBuf>,
     pub title: String,
     pub detail: String,
@@ -92,6 +107,7 @@ impl SwitchWindow {
 
         Self {
             window_id: window.window_id.clone(),
+            window_name: window.window_name.clone(),
             project_path: window.project_path.clone(),
             title,
             detail,
@@ -239,8 +255,12 @@ fn record_switch_selection(
         return Ok(false);
     };
 
-    state.record_project_access(project_path, selected_at)?;
-    Ok(true)
+    state.record_project_access(
+        project_path,
+        &selection.window_id,
+        selection.window_name.as_deref(),
+        selected_at,
+    )
 }
 
 fn project_state_for_path(
@@ -298,6 +318,9 @@ mod tests {
                     .to_string(),
                 ProjectStateRecord {
                     last_accessed_at: parse_timestamp("2026-04-15T12:00:00Z"),
+                    last_seen_at: parse_timestamp("2026-04-15T12:05:10Z"),
+                    last_window_id: "window-1".to_owned(),
+                    last_window_name: Some("Workspace".to_owned()),
                 },
             )]),
         };
@@ -337,6 +360,9 @@ mod tests {
                 "/path/that/does/not/exist".to_owned(),
                 ProjectStateRecord {
                     last_accessed_at: parse_timestamp("2026-04-15T12:00:00Z"),
+                    last_seen_at: parse_timestamp("2026-04-15T12:05:10Z"),
+                    last_window_id: "window-1".to_owned(),
+                    last_window_name: Some("Workspace".to_owned()),
                 },
             )]),
         };
@@ -395,6 +421,9 @@ mod tests {
                     .to_string(),
                 ProjectStateRecord {
                     last_accessed_at: parse_timestamp("2026-04-15T12:00:00Z"),
+                    last_seen_at: parse_timestamp("2026-04-15T12:05:10Z"),
+                    last_window_id: "window-1".to_owned(),
+                    last_window_name: Some("Workspace".to_owned()),
                 },
             )]),
         };
@@ -413,6 +442,7 @@ mod tests {
 
         let selection = SwitchWindow {
             window_id: "window-1".to_owned(),
+            window_name: Some("Workspace".to_owned()),
             project_path: Some(project_dir.clone()),
             title: "project".to_owned(),
             detail: project_dir.display().to_string(),
@@ -433,6 +463,9 @@ mod tests {
             state.projects.get(&key),
             Some(&ProjectStateRecord {
                 last_accessed_at: selected_at,
+                last_seen_at: selected_at,
+                last_window_id: "window-1".to_owned(),
+                last_window_name: Some("Workspace".to_owned()),
             })
         );
     }
@@ -441,6 +474,7 @@ mod tests {
     fn recording_pathless_switch_selection_leaves_state_unchanged() {
         let selection = SwitchWindow {
             window_id: "window-2".to_owned(),
+            window_name: Some("Detached".to_owned()),
             project_path: None,
             title: "No project path".to_owned(),
             detail: "window-2".to_owned(),
@@ -453,6 +487,57 @@ mod tests {
 
         assert!(!changed);
         assert_eq!(state, StateFile::empty());
+    }
+
+    #[test]
+    fn listed_windows_exposes_extended_state_fields() {
+        let temp_dir = unique_test_dir();
+        let project_dir = temp_dir.join("project");
+        fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+        let inventory = WindowInventory::from_windows(vec![Window {
+            window_id: "window-1".to_owned(),
+            window_name: Some("Workspace".to_owned()),
+            project_path: Some(project_dir.clone()),
+            tabs: vec![Tab {
+                tab_id: "tab-1".to_owned(),
+                tab_name: Some("Editor".to_owned()),
+                index: 1,
+                terminals: vec![Terminal {
+                    terminal_id: "terminal-1".to_owned(),
+                    working_directory: Some(project_dir.clone()),
+                }],
+            }],
+        }]);
+        let state = StateFile {
+            version: 1,
+            projects: BTreeMap::from([(
+                project_dir
+                    .canonicalize()
+                    .expect("project dir should canonicalize")
+                    .display()
+                    .to_string(),
+                ProjectStateRecord {
+                    last_accessed_at: parse_timestamp("2026-04-15T12:00:00Z"),
+                    last_seen_at: parse_timestamp("2026-04-15T12:05:10Z"),
+                    last_window_id: "window-1".to_owned(),
+                    last_window_name: Some("Workspace".to_owned()),
+                },
+            )]),
+        };
+
+        let listed = ListedWindows::from_live_and_state(&inventory, &state);
+        let joined_state = listed.windows[0]
+            .state
+            .as_ref()
+            .expect("window state should be joined");
+
+        assert_eq!(joined_state.last_window_id, "window-1");
+        assert_eq!(joined_state.last_window_name.as_deref(), Some("Workspace"));
+        assert_eq!(
+            joined_state.last_seen_at,
+            parse_timestamp("2026-04-15T12:05:10Z")
+        );
     }
 
     fn unique_test_dir() -> PathBuf {

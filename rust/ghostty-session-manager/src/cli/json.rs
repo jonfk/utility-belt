@@ -23,6 +23,7 @@ mod tests {
 
     use super::render_inventory;
     use crate::application::{ListedTab, ListedTerminal, ListedWindow, ListedWindows};
+    use crate::state::ProjectStateRecord;
 
     #[test]
     fn renders_json_with_stable_field_names_and_nulls() {
@@ -91,5 +92,52 @@ mod tests {
 
         assert_eq!(value["windows"][0]["tabs"][0]["tab_id"], "tab-1");
         assert_eq!(value["windows"][0]["tabs"][1]["tab_id"], "tab-2");
+    }
+
+    #[test]
+    fn serializes_extended_project_state_fields() {
+        let inventory = ListedWindows {
+            windows: vec![ListedWindow {
+                window_id: "window-1".to_owned(),
+                window_name: Some("Workspace".to_owned()),
+                project_path: Some(PathBuf::from("/Users/example/project")),
+                tabs: vec![ListedTab {
+                    tab_id: "tab-1".to_owned(),
+                    tab_name: Some("Editor".to_owned()),
+                    index: 1,
+                    terminals: vec![ListedTerminal {
+                        terminal_id: "terminal-1".to_owned(),
+                        working_directory: Some(PathBuf::from("/Users/example/project")),
+                    }],
+                }],
+                state: Some(ProjectStateRecord {
+                    last_accessed_at: "2026-04-15T12:00:00Z"
+                        .parse()
+                        .expect("timestamp fixture should parse"),
+                    last_seen_at: "2026-04-15T12:05:10Z"
+                        .parse()
+                        .expect("timestamp fixture should parse"),
+                    last_window_id: "window-1".to_owned(),
+                    last_window_name: Some("Workspace".to_owned()),
+                }),
+            }],
+        };
+
+        let rendered = render_inventory(&inventory).expect("json should render");
+        let value: Value = serde_json::from_str(&rendered).expect("json should parse");
+
+        assert_eq!(
+            value["windows"][0]["state"]["last_accessed_at"],
+            "2026-04-15T12:00:00Z"
+        );
+        assert_eq!(
+            value["windows"][0]["state"]["last_seen_at"],
+            "2026-04-15T12:05:10Z"
+        );
+        assert_eq!(value["windows"][0]["state"]["last_window_id"], "window-1");
+        assert_eq!(
+            value["windows"][0]["state"]["last_window_name"],
+            "Workspace"
+        );
     }
 }
