@@ -79,7 +79,7 @@ fn run_switch(
             .collect()
     };
 
-    match tui::run_picker(entries, command_span, &run_span)? {
+    match tui::run_picker(entries, &context.state.projects, command_span, &run_span)? {
         PickerOutcome::Confirm(entry) => {
             let selection = {
                 let _command_enter = command_span.enter();
@@ -126,6 +126,11 @@ fn write_stdout(rendered: &str) -> Result<(), Report<AppError>> {
 
 fn picker_entry_from_window(window: &SwitchWindow) -> PickerEntry {
     PickerEntry {
+        project_key: window
+            .project_path
+            .as_ref()
+            .map(|project_path| project_path.display().to_string())
+            .unwrap_or_else(|| window.window_id.clone()),
         window_id: window.window_id.clone(),
         title: window.title.clone(),
         detail: window.detail.clone(),

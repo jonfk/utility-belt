@@ -40,9 +40,12 @@ The following pieces are already implemented:
   - fuzzy score
   - MRU weighting
   - canonical project key tie-breaking
-- Basic `ratatui` switcher with:
-  - browse-only list
-  - selection movement
+- Query-driven `ratatui` switcher with:
+  - typed filtering over cached project rows
+  - selection movement within filtered results
+  - selection preservation by canonical project key when still visible
+  - fallback to the first filtered result when the previous selection drops out
+  - empty-state rendering when no cached projects match
   - confirm
   - cancel
 - Updating MRU state after a successful switch.
@@ -51,8 +54,6 @@ The following pieces are already implemented:
 
 The following pieces are not implemented yet:
 
-- Typed search inside the switcher.
-- Wiring cached search/ranking into the picker UI.
 - One-shot background live reconciliation while the picker is open.
 - Selection fallback from stale cached ids to live resolution by project path.
 - Explicit stale-record pruning or richer project identity reconciliation.
@@ -70,15 +71,19 @@ Today the command behavior is:
   - renders either table or JSON output
 - `switch`
   - loads persisted state
-  - if cached projects exist, opens a browse-only picker from cached project rows immediately
+  - if cached projects exist, opens a query-driven picker from cached project rows immediately
   - if the state file is empty, performs a one-time live Ghostty query to seed state
-  - orders cached rows by MRU with deterministic tie-breaking
+  - starts with cached rows ordered by MRU with deterministic tie-breaking
+  - updates filtered results as the user types, using cached ranking from `search.rs`
+  - preserves the current selection when the selected project remains in the filtered set
+  - falls back to the first filtered result when the previous selection disappears
+  - shows an empty state when the current query has no cached matches
   - focuses the selected window
   - records `last_accessed_at` and cached window hints for the selected project
 
 That means `switch` now uses a stale-first cached path. Live reconciliation
-while the picker is open, typed filtering in the picker, and fallback from
-stale cached window ids are still deferred to later phases.
+while the picker is open and fallback from stale cached window ids are still
+deferred to later phases.
 
 ## Completed Work
 
@@ -185,23 +190,52 @@ Verification:
   queries across similar project names.
 - `cargo test` passes with the new search module.
 
-## Remaining Work
-
 ### Phase 4: Plug Search Into The TUI
 
-Add typed filtering to the existing picker.
+Phase 4 is now implemented.
 
-- Add query input and filtered result updates.
-- Preserve selection sensibly as the filtered result set changes.
-- Keep the search logic testable outside the terminal UI.
-- Continue updating MRU state when a selection is confirmed.
+- `PickerEntry` now carries the canonical project key used by the persisted
+  state map.
+- The picker state now owns:
+  - the full cached entry set keyed by canonical project key
+  - the current query string
+  - the current filtered project-key order
+  - the currently selected project key
+- The TUI now calls `search::rank_project_keys` on every query change instead
+  of duplicating ranking logic in the UI layer.
+- Query editing now supports:
+  - printable character input
+  - backspace deletion
+  - query-aware filtered movement
+  - confirm on the current filtered selection
+  - cancel via `Esc` or `q`
+- Selection behavior now:
+  - preserves the selected project when it remains visible after filtering
+  - falls back to the first filtered result when it does not
+  - clears selection and returns `Cancel` when there are no filtered rows
+- The rendered picker now shows:
+  - an explicit query field
+  - filtered cached rows
+  - an empty-state message when no cached projects match
+- `cli::run_switch` now passes `context.state.projects` into the picker so the
+  UI ranks against the persisted cache directly.
+- `complete_switch` behavior is unchanged and still updates MRU state after a
+  successful selection.
 
 Verification:
 
-- State-oriented tests cover query updates, filtering, movement, confirm, and
-  cancel.
-- Manual smoke test: typing a query narrows results and selecting still focuses
-  the intended window.
+- TUI tests now cover:
+  - empty-query MRU ordering
+  - query updates and filtered ordering
+  - backspace widening the filtered set
+  - movement within filtered results
+  - selection preservation by project key
+  - fallback to the first filtered result
+  - empty-query and no-result confirm behavior
+  - cancel behavior
+- `cargo test` passes with the phase 4 picker changes.
+
+## Remaining Work
 
 ### Phase 5: Add One-Shot Live Reconciliation
 
@@ -264,10 +298,9 @@ Verification:
 
 The remaining work can be shipped in this order:
 
-1. Phase 4
-2. Phase 5
-3. Phase 6
-4. Phase 7
+1. Phase 5
+2. Phase 6
+3. Phase 7
 
 That order keeps the fast-path switch work ahead of the more subtle live
 reconciliation and cache-hygiene work.

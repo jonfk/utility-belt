@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
 use std::io;
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -18,9 +19,12 @@ use ratatui::{
 use tracing::info_span;
 
 use crate::error::AppError;
+use crate::search::rank_project_keys;
+use crate::state::ProjectStateRecord;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickerEntry {
+    pub project_key: String,
     pub window_id: String,
     pub title: String,
     pub detail: String,
@@ -34,31 +38,65 @@ pub enum PickerOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickerState {
-    entries: Vec<PickerEntry>,
-    selected_index: usize,
+    entries_by_project_key: BTreeMap<String, PickerEntry>,
+    filtered_project_keys: Vec<String>,
+    selected_project_key: Option<String>,
+    query: String,
 }
 
 impl PickerState {
-    pub fn new(entries: Vec<PickerEntry>) -> Self {
-        Self {
-            entries,
-            selected_index: 0,
-        }
+    pub fn new(entries: Vec<PickerEntry>, projects: &BTreeMap<String, ProjectStateRecord>) -> Self {
+        let entries_by_project_key = entries
+            .into_iter()
+            .map(|entry| (entry.project_key.clone(), entry))
+            .collect::<BTreeMap<_, _>>();
+        let mut state = Self {
+            entries_by_project_key,
+            filtered_project_keys: Vec::new(),
+            selected_project_key: None,
+            query: String::new(),
+        };
+        state.refresh_filtered_projects(projects);
+        state
     }
 
-    pub fn selected_index(&self) -> usize {
-        self.selected_index
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub fn selected_index(&self) -> Option<usize> {
+        let selected_project_key = self.selected_project_key.as_ref()?;
+        self.filtered_project_keys
+            .iter()
+            .position(|project_key| project_key == selected_project_key)
+    }
+
+    pub fn filtered_entries(&self) -> Vec<&PickerEntry> {
+        self.filtered_project_keys
+            .iter()
+            .filter_map(|project_key| self.entries_by_project_key.get(project_key))
+            .collect()
     }
 
     pub fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
+        let Some(selected_index) = self.selected_index() else {
+            return;
+        };
+
+        if selected_index > 0 {
+            self.selected_project_key =
+                Some(self.filtered_project_keys[selected_index - 1].clone());
         }
     }
 
     pub fn move_down(&mut self) {
-        if self.selected_index + 1 < self.entries.len() {
-            self.selected_index += 1;
+        let Some(selected_index) = self.selected_index() else {
+            return;
+        };
+
+        if selected_index + 1 < self.filtered_project_keys.len() {
+            self.selected_project_key =
+                Some(self.filtered_project_keys[selected_index + 1].clone());
         }
     }
 
@@ -73,13 +111,50 @@ impl PickerState {
         PickerOutcome::Cancel
     }
 
+    pub fn append_query_char(
+        &mut self,
+        character: char,
+        projects: &BTreeMap<String, ProjectStateRecord>,
+    ) {
+        self.query.push(character);
+        self.refresh_filtered_projects(projects);
+    }
+
+    pub fn pop_query_char(&mut self, projects: &BTreeMap<String, ProjectStateRecord>) {
+        if self.query.pop().is_some() {
+            self.refresh_filtered_projects(projects);
+        }
+    }
+
     fn selected_entry(&self) -> Option<&PickerEntry> {
-        self.entries.get(self.selected_index)
+        let selected_project_key = self.selected_project_key.as_ref()?;
+        self.entries_by_project_key.get(selected_project_key)
+    }
+
+    fn refresh_filtered_projects(&mut self, projects: &BTreeMap<String, ProjectStateRecord>) {
+        let previous_selection = self.selected_project_key.clone();
+        self.filtered_project_keys = rank_project_keys(&self.query, projects)
+            .into_iter()
+            .filter(|project_key| self.entries_by_project_key.contains_key(project_key))
+            .collect();
+
+        self.selected_project_key = match previous_selection {
+            Some(previous_selection)
+                if self
+                    .filtered_project_keys
+                    .iter()
+                    .any(|project_key| project_key == &previous_selection) =>
+            {
+                Some(previous_selection)
+            }
+            _ => self.filtered_project_keys.first().cloned(),
+        };
     }
 }
 
 pub fn run_picker(
     entries: Vec<PickerEntry>,
+    projects: &BTreeMap<String, ProjectStateRecord>,
     command_span: &tracing::Span,
     run_span: &tracing::Span,
 ) -> Result<PickerOutcome, Report<AppError>> {
@@ -109,13 +184,17 @@ pub fn run_picker(
     };
     let _cleanup = TerminalCleanup;
 
-    let mut state = PickerState::new(entries);
+    let mut state = PickerState::new(entries, projects);
 
     loop {
         {
             let _command_enter = command_span.enter();
             let _run_enter = run_span.enter();
-            let draw_span = info_span!("tui.draw", selected_index = state.selected_index());
+            let draw_span = info_span!(
+                "tui.draw",
+                selected_index = state.selected_index(),
+                query = state.query()
+            );
             let _draw_enter = draw_span.enter();
             terminal
                 .draw(|frame| render_picker(frame, &state))
@@ -130,7 +209,7 @@ pub fn run_picker(
             let _run_enter = run_span.enter();
             let handle_span = info_span!("tui.handle_key_event", key = ?key_event.code);
             let _handle_enter = handle_span.enter();
-            handle_key_event(key_event, &mut state)
+            handle_key_event(key_event, &mut state, projects)
         } {
             return Ok(outcome);
         }
@@ -161,7 +240,11 @@ fn read_key_event() -> Result<KeyEvent, Report<AppError>> {
     }
 }
 
-fn handle_key_event(key_event: KeyEvent, state: &mut PickerState) -> Option<PickerOutcome> {
+fn handle_key_event(
+    key_event: KeyEvent,
+    state: &mut PickerState,
+    projects: &BTreeMap<String, ProjectStateRecord>,
+) -> Option<PickerOutcome> {
     match key_event.code {
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
@@ -171,15 +254,27 @@ fn handle_key_event(key_event: KeyEvent, state: &mut PickerState) -> Option<Pick
             state.move_down();
             None
         }
+        KeyCode::Backspace => {
+            state.pop_query_char(projects);
+            None
+        }
         KeyCode::Enter => Some(state.confirm()),
         KeyCode::Esc | KeyCode::Char('q') => Some(state.cancel()),
+        KeyCode::Char(character) if is_printable_query_char(character, key_event.modifiers) => {
+            state.append_query_char(character, projects);
+            None
+        }
         _ => None,
     }
 }
 
 fn render_picker(frame: &mut Frame, state: &PickerState) {
-    let [instructions_area, list_area] =
-        Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(frame.area());
+    let [instructions_area, query_area, list_area] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(3),
+        Constraint::Min(1),
+    ])
+    .areas(frame.area());
 
     let instructions = Paragraph::new("Up/k Down/j move  Enter select  Esc/q cancel").block(
         Block::default()
@@ -188,8 +283,27 @@ fn render_picker(frame: &mut Frame, state: &PickerState) {
     );
     frame.render_widget(instructions, instructions_area);
 
-    let items: Vec<ListItem> = state
-        .entries
+    let query = if state.query().is_empty() {
+        "Type to filter cached projects".to_owned()
+    } else {
+        state.query().to_owned()
+    };
+    let query_widget = Paragraph::new(query).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Query (Backspace deletes)"),
+    );
+    frame.render_widget(query_widget, query_area);
+
+    let filtered_entries = state.filtered_entries();
+    if filtered_entries.is_empty() {
+        let empty_state = Paragraph::new("No cached projects match the current query")
+            .block(Block::default().borders(Borders::ALL).title("Windows"));
+        frame.render_widget(empty_state, list_area);
+        return;
+    }
+
+    let items: Vec<ListItem> = filtered_entries
         .iter()
         .map(|entry| {
             ListItem::new(vec![
@@ -207,48 +321,63 @@ fn render_picker(frame: &mut Frame, state: &PickerState) {
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">> ");
 
-    let mut list_state = ListState::default().with_selected(Some(state.selected_index));
+    let mut list_state = ListState::default().with_selected(state.selected_index());
     frame.render_stateful_widget(list, list_area, &mut list_state);
+}
+
+fn is_printable_query_char(character: char, modifiers: KeyModifiers) -> bool {
+    (character.is_ascii_graphic() || character == ' ')
+        && !modifiers.contains(KeyModifiers::CONTROL)
+        && !modifiers.contains(KeyModifiers::ALT)
+        && !modifiers.contains(KeyModifiers::SUPER)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PickerEntry, PickerOutcome, PickerState};
+    use std::collections::BTreeMap;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use jiff::Timestamp;
+
+    use super::{PickerEntry, PickerOutcome, PickerState, handle_key_event};
+    use crate::state::ProjectStateRecord;
 
     #[test]
     fn first_row_is_selected_initially() {
-        let state = PickerState::new(sample_entries());
+        let state = PickerState::new(sample_entries(), &sample_projects());
 
-        assert_eq!(state.selected_index(), 0);
+        assert_eq!(state.selected_index(), Some(0));
     }
 
     #[test]
     fn moving_up_at_start_stays_on_first_row() {
-        let mut state = PickerState::new(sample_entries());
+        let mut state = PickerState::new(sample_entries(), &sample_projects());
 
         state.move_up();
 
-        assert_eq!(state.selected_index(), 0);
+        assert_eq!(state.selected_index(), Some(0));
     }
 
     #[test]
     fn moving_down_at_end_stays_on_last_row() {
-        let mut state = PickerState::new(sample_entries());
+        let mut state = PickerState::new(sample_entries(), &sample_projects());
         state.move_down();
         state.move_down();
         state.move_down();
 
-        assert_eq!(state.selected_index(), 1);
+        assert_eq!(state.selected_index(), Some(2));
     }
 
     #[test]
     fn confirm_returns_selected_row() {
-        let mut state = PickerState::new(sample_entries());
+        let mut state = PickerState::new(sample_entries(), &sample_projects());
+        state.move_down();
         state.move_down();
 
         assert_eq!(
             state.confirm(),
             PickerOutcome::Confirm(PickerEntry {
+                project_key: "/tmp/project-b".to_owned(),
                 window_id: "window-2".to_owned(),
                 title: "project-b".to_owned(),
                 detail: "/tmp/project-b | window-2".to_owned(),
@@ -258,23 +387,187 @@ mod tests {
 
     #[test]
     fn cancel_returns_cancel_outcome() {
-        let state = PickerState::new(sample_entries());
+        let state = PickerState::new(sample_entries(), &sample_projects());
 
         assert_eq!(state.cancel(), PickerOutcome::Cancel);
+    }
+
+    #[test]
+    fn empty_query_uses_mru_ordering() {
+        let state = PickerState::new(sample_entries(), &sample_projects());
+
+        assert_eq!(
+            state
+                .filtered_entries()
+                .into_iter()
+                .map(|entry| entry.project_key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/tmp/project-c", "/tmp/project-a", "/tmp/project-b"]
+        );
+    }
+
+    #[test]
+    fn typing_query_updates_filtered_entries() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+
+        state.append_query_char('b', &projects);
+
+        assert_eq!(state.query(), "b");
+        assert_eq!(
+            state
+                .filtered_entries()
+                .into_iter()
+                .map(|entry| entry.project_key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/tmp/project-b"]
+        );
+    }
+
+    #[test]
+    fn backspace_widens_filtered_entries() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+        state.append_query_char('p', &projects);
+        state.append_query_char('r', &projects);
+        state.append_query_char('o', &projects);
+        state.append_query_char('j', &projects);
+        state.append_query_char('e', &projects);
+        state.append_query_char('c', &projects);
+        state.append_query_char('t', &projects);
+        state.append_query_char('-', &projects);
+        state.append_query_char('b', &projects);
+
+        state.pop_query_char(&projects);
+
+        assert_eq!(state.query(), "project-");
+        assert_eq!(state.filtered_entries().len(), 3);
+    }
+
+    #[test]
+    fn selection_is_preserved_by_project_key_when_still_visible() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+        state.move_down();
+
+        state.append_query_char('a', &projects);
+
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(PickerEntry {
+                project_key: "/tmp/project-a".to_owned(),
+                window_id: "window-1".to_owned(),
+                title: "project-a".to_owned(),
+                detail: "/tmp/project-a | window-1".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn selection_falls_back_to_first_filtered_result_when_previous_selection_disappears() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+        state.move_down();
+
+        for character in "project-c".chars() {
+            state.append_query_char(character, &projects);
+        }
+
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(PickerEntry {
+                project_key: "/tmp/project-c".to_owned(),
+                window_id: "window-3".to_owned(),
+                title: "project-c".to_owned(),
+                detail: "/tmp/project-c | window-3".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn confirm_returns_cancel_when_query_has_no_results() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+
+        state.append_query_char('z', &projects);
+        state.append_query_char('z', &projects);
+        state.append_query_char('z', &projects);
+
+        assert_eq!(state.selected_index(), None);
+        assert_eq!(state.confirm(), PickerOutcome::Cancel);
+    }
+
+    #[test]
+    fn handle_key_event_appends_and_deletes_query_text() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+
+        assert_eq!(
+            handle_key_event(key_event(KeyCode::Char('b')), &mut state, &projects),
+            None
+        );
+        assert_eq!(
+            handle_key_event(key_event(KeyCode::Backspace), &mut state, &projects),
+            None
+        );
+
+        assert_eq!(state.query(), "");
     }
 
     fn sample_entries() -> Vec<PickerEntry> {
         vec![
             PickerEntry {
+                project_key: "/tmp/project-a".to_owned(),
                 window_id: "window-1".to_owned(),
                 title: "project-a".to_owned(),
                 detail: "/tmp/project-a | window-1".to_owned(),
             },
             PickerEntry {
+                project_key: "/tmp/project-b".to_owned(),
                 window_id: "window-2".to_owned(),
                 title: "project-b".to_owned(),
                 detail: "/tmp/project-b | window-2".to_owned(),
             },
+            PickerEntry {
+                project_key: "/tmp/project-c".to_owned(),
+                window_id: "window-3".to_owned(),
+                title: "project-c".to_owned(),
+                detail: "/tmp/project-c | window-3".to_owned(),
+            },
         ]
+    }
+
+    fn sample_projects() -> BTreeMap<String, ProjectStateRecord> {
+        BTreeMap::from([
+            (
+                "/tmp/project-a".to_owned(),
+                project_record("2026-04-16T10:00:00Z"),
+            ),
+            (
+                "/tmp/project-b".to_owned(),
+                project_record("2026-04-16T09:00:00Z"),
+            ),
+            (
+                "/tmp/project-c".to_owned(),
+                project_record("2026-04-16T11:00:00Z"),
+            ),
+        ])
+    }
+
+    fn project_record(last_accessed_at: &str) -> ProjectStateRecord {
+        ProjectStateRecord {
+            last_accessed_at: parse_timestamp(last_accessed_at),
+            last_seen_at: parse_timestamp("2026-04-16T12:00:00Z"),
+            last_window_id: "window".to_owned(),
+            last_window_name: Some("Workspace".to_owned()),
+        }
+    }
+
+    fn key_event(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn parse_timestamp(input: &str) -> Timestamp {
+        input.parse().expect("timestamp fixture should parse")
     }
 }
