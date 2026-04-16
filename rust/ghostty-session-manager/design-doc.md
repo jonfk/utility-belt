@@ -149,20 +149,64 @@ proves too imprecise in practice.
 
 ## Architecture
 
+### Architectural Style
+
+The implementation should follow a light ports-and-adapters approach.
+
+This is not intended to be a full clean-architecture design with traits and
+indirection at every layer. The goal is to keep the code modular and easy to
+change without turning a small CLI into a framework exercise.
+
+Design consequences:
+
+- keep the domain and application logic separate from AppleScript execution
+- isolate Ghostty-specific integration details in infrastructure code
+- avoid introducing traits until there is a concrete need for substitution or
+  test doubles
+- prefer straightforward concrete types and modules over abstract interfaces in
+  the first version
+
 ### Components
 
 1. CLI layer
    Parses subcommands and output mode.
-2. Ghostty adapter
+2. Application layer
+   Orchestrates command workflows such as listing windows and switching to an
+   existing project window.
+3. Ghostty integration
    Executes AppleScript through `osascript` and parses structured output.
-3. Domain model
+4. Domain model
    Represents windows, tabs, projects, and usage metadata.
-4. State store
+5. State store
    Loads and saves JSON metadata.
-5. Search and ranking
+6. Search and ranking
    Combines fuzzy match score, basename preference, and recency.
-6. TUI
+7. TUI
    Presents interactive selection for `switch`.
+
+### Boundary Decisions
+
+The Ghostty integration should start as a concrete implementation rather than a
+trait-backed port.
+
+Reasoning:
+
+- only a small set of operations is currently required
+- there is only one known backend: Ghostty via AppleScript
+- introducing a trait before it is needed would add ceremony without improving
+  clarity
+
+The first concrete Ghostty API should be minimal:
+
+- `query_windows`
+- `focus_window`
+
+Additional operations such as window creation or tab creation can be added when
+the command implementations actually require them.
+
+If the AppleScript boundary becomes harder to test, a second backend appears,
+or the application layer starts depending on integration details, that is the
+time to extract a formal port trait.
 
 ### Suggested Module Layout
 
@@ -170,9 +214,10 @@ Possible initial layout:
 
 - `src/main.rs`
 - `src/cli.rs`
+- `src/app.rs`
+- `src/domain.rs`
 - `src/ghostty.rs`
-- `src/applescript.rs`
-- `src/model.rs`
+- `src/ghostty/applescript.rs`
 - `src/state.rs`
 - `src/search.rs`
 - `src/tui.rs`
@@ -181,24 +226,30 @@ Possible initial layout:
 This does not need to exist immediately; it is a target shape as the codebase
 grows.
 
+The short runtime type names in this document assume they live in a clearly
+named Ghostty-focused module such as `ghostty` or `ghostty::model`.
+
 ## Data Model
 
 ### Runtime Model
 
 ```text
-GhosttyWindow
+WindowInventory
+- windows: Vec<Window>
+
+Window
 - window_id: i64
 - window_name: Option<String>
 - project_path: Option<PathBuf>
-- tabs: Vec<GhosttyTab>
+- tabs: Vec<Tab>
 
-GhosttyTab
+Tab
 - tab_id: i64
 - tab_name: Option<String>
 - index: usize
-- terminals: Vec<GhosttyTerminal>
+- terminals: Vec<Terminal>
 
-GhosttyTerminal
+Terminal
 - terminal_id: i64
 - working_directory: Option<PathBuf>
 ```
@@ -230,11 +281,11 @@ GhosttyTerminal
 
 ## AppleScript Strategy
 
-The Ghostty adapter should prefer one script per logical action.
+The Ghostty integration layer should prefer one script per logical action.
 
 Examples:
 
-- one script to list all windows and their first-tab working directories
+- one script for `query_windows`
 - one script to focus a window or terminal
 - one script to create a new window with an initial working directory
 
