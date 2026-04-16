@@ -13,4 +13,7 @@ pub enum AppError {
 
     #[error("Failed to render output")]
     Output,
+
+    #[error("State storage failed")]
+    State,
 }

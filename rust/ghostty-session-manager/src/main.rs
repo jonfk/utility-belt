@@ -3,6 +3,7 @@ mod cli;
 mod domain;
 mod error;
 mod ghostty;
+mod state;
 
 use clap::Parser;
 
