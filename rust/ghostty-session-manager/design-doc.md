@@ -7,6 +7,16 @@ project-scoped sessions. It uses Ghostty's AppleScript API as the control plane
 for reading window state and performing actions such as focusing windows and
 creating new ones.
 
+The implementation should be based on Ghostty's actual scripting dictionary,
+not an assumed AppleScript surface. A checked-in snapshot of the dictionary
+used for development lives at `reference/Ghostty.sdef`.
+
+Current baseline:
+
+- Ghostty version: `1.3.1`
+- bundle build: `15212`
+- snapshot date: `2026-04-15`
+
 The first version should optimize for simplicity:
 
 - no background daemon
@@ -93,15 +103,37 @@ inside the application.
 Ghostty AppleScript capabilities relevant to this project include:
 
 - reading windows, tabs, terminals, and terminal working directories
-- focusing terminals
+- reading `selected tab`, `focused terminal`, and tab `index`
 - activating windows
+- selecting tabs
+- focusing terminals
+- creating `surface configuration` records
 - creating windows and tabs with an initial working directory
+
+The current dictionary is shipped inside the app bundle at:
+
+`/Applications/Ghostty.app/Contents/Resources/Ghostty.sdef`
+
+The current checked-in snapshot was taken from:
+
+- Ghostty version `1.3.1`
+- bundle build `15212`
+- app bundle path `/Applications/Ghostty.app`
+
+Important observations from the real dictionary:
+
+- `window.id`, `tab.id`, and `terminal.id` are `text`, not integers
+- `tab.index` is the only integer-like stable ordering field exposed for tabs
+- working directory is exposed on `terminal`, not `window` or `tab`
+- the action verbs are concrete AppleScript commands such as `activate window`,
+  `select tab`, `focus`, `new window`, and `new tab`
 
 ## Terminology
 
 - `project`: canonical filesystem path used as the session identity
 - `window session`: a Ghostty window associated with a project
-- `derived project path`: project path inferred from the first tab or terminal
+- `derived project path`: project path inferred from the first terminal in the
+  first tab
 - `state store`: local JSON file with metadata not owned by Ghostty
 
 ## First-Pass Scope
@@ -119,8 +151,8 @@ The first implementation target is `ls`.
 
 ### Window Identity
 
-The working directory of the first tab is the initial heuristic for determining
-the project's path for a Ghostty window.
+The working directory of the first terminal in the first tab is the initial
+heuristic for determining the project's path for a Ghostty window.
 
 Important caveat:
 
@@ -133,7 +165,7 @@ Design response:
 - persist a canonical project path in the local state store once a window is
   known
 - prefer explicit state over re-deriving identity every time when available
-- only inspect the first tab in the first version
+- only inspect the first terminal in the first tab in the first version
 
 Scanning all tabs is deferred. If added later, that would mean using any tab's
 working directory as a lookup signal for finding the right window. It would not
@@ -201,6 +233,9 @@ The first concrete Ghostty API should be minimal:
 - `query_windows`
 - `focus_window`
 
+The currently implemented `query_windows` boundary is based on the real
+dictionary and returns string IDs for windows, tabs, and terminals.
+
 Additional operations such as window creation or tab creation can be added when
 the command implementations actually require them.
 
@@ -238,19 +273,19 @@ WindowInventory
 - windows: Vec<Window>
 
 Window
-- window_id: i64
+- window_id: String
 - window_name: Option<String>
 - project_path: Option<PathBuf>
 - tabs: Vec<Tab>
 
 Tab
-- tab_id: i64
+- tab_id: String
 - tab_name: Option<String>
 - index: usize
 - terminals: Vec<Terminal>
 
 Terminal
-- terminal_id: i64
+- terminal_id: String
 - working_directory: Option<PathBuf>
 ```
 
@@ -264,7 +299,7 @@ Terminal
       "project_path": "/Users/example/src/project-a",
       "last_selected_at": "2026-04-15T12:00:00Z",
       "selection_count": 42,
-      "last_window_id": 1234
+      "last_window_id": "tab-group-600002952eb0"
     }
   ]
 }
@@ -275,6 +310,8 @@ Terminal
 - `version` allows lightweight future migrations
 - `project_path` is the stable key
 - `last_window_id` is a hint, not a trusted permanent identifier
+- Ghostty currently exposes window IDs as stable text values, so persisted IDs
+  should be strings
 - timestamps should be stored in UTC
 - persisted state should avoid storing full live window or tab inventories as
   authoritative data
@@ -298,6 +335,19 @@ Preferred formats:
 
 TSV is likely the simplest starting point because it is easy to generate from
 AppleScript and easy to parse in Rust.
+
+For the implemented `ls` command, the TSV row shape is:
+
+- `window_id`
+- `window_name`
+- `tab_id`
+- `tab_index`
+- `tab_name`
+- `terminal_id`
+- `working_directory`
+
+This mirrors the fields exposed by the current Ghostty dictionary closely and
+keeps the AppleScript script dumb while Rust owns grouping and derivation.
 
 ## Sync Strategy
 
@@ -401,6 +451,8 @@ Important failure cases:
 - Ghostty not running
 - Ghostty installed but AppleScript unavailable
 - Automation permission denied
+- Ghostty AppleScript dictionary changed since the snapshot the tool was built
+  against
 - no readable working directory for a window
 - corrupted or missing JSON state file
 
@@ -417,6 +469,8 @@ Useful early diagnostics:
 - `--json` output for machine inspection
 - `--verbose` for printing AppleScript invocation details
 - clear parse errors when script output is malformed
+- a checked-in dictionary snapshot in `reference/Ghostty.sdef` for diffing
+  against future Ghostty releases
 
 ## Default State File Location
 
