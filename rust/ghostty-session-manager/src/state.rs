@@ -32,6 +32,21 @@ impl StateFile {
             projects: BTreeMap::new(),
         }
     }
+
+    pub fn record_project_access(
+        &mut self,
+        project_path: &Path,
+        accessed_at: Timestamp,
+    ) -> Result<(), Report<AppError>> {
+        let canonical_key = StateStore::canonical_project_key(project_path)?;
+        self.projects.insert(
+            canonical_key,
+            ProjectStateRecord {
+                last_accessed_at: accessed_at,
+            },
+        );
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,6 +252,62 @@ mod tests {
         assert!(rendered.contains("\"version\": 1"));
         assert!(rendered.contains("\n  \"projects\": {"));
         assert!(rendered.contains("\"last_accessed_at\": \"2026-04-15T12:00:00Z\""));
+    }
+
+    #[test]
+    fn record_project_access_creates_new_project_record() {
+        let temp_dir = unique_test_dir();
+        let project_dir = temp_dir.join("project");
+        fs::create_dir_all(&project_dir).expect("project dir should exist");
+        let accessed_at = parse_timestamp("2026-04-16T09:30:00Z");
+
+        let mut state = StateFile::empty();
+        state
+            .record_project_access(&project_dir, accessed_at)
+            .expect("recording access should succeed");
+
+        let key = project_dir
+            .canonicalize()
+            .expect("project dir should canonicalize")
+            .display()
+            .to_string();
+        assert_eq!(
+            state.projects.get(&key),
+            Some(&ProjectStateRecord {
+                last_accessed_at: accessed_at,
+            })
+        );
+    }
+
+    #[test]
+    fn record_project_access_updates_existing_project_record() {
+        let temp_dir = unique_test_dir();
+        let project_dir = temp_dir.join("project");
+        fs::create_dir_all(&project_dir).expect("project dir should exist");
+        let key = project_dir
+            .canonicalize()
+            .expect("project dir should canonicalize")
+            .display()
+            .to_string();
+        let mut state = StateFile::empty();
+        state.projects.insert(
+            key.clone(),
+            ProjectStateRecord {
+                last_accessed_at: parse_timestamp("2026-04-15T12:00:00Z"),
+            },
+        );
+
+        let updated_at = parse_timestamp("2026-04-16T09:30:00Z");
+        state
+            .record_project_access(&project_dir, updated_at)
+            .expect("recording access should update existing project");
+
+        assert_eq!(
+            state.projects.get(&key),
+            Some(&ProjectStateRecord {
+                last_accessed_at: updated_at,
+            })
+        );
     }
 
     #[test]

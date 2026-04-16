@@ -72,6 +72,24 @@ set AppleScript's text item delimiters to ""
 return output_text
 "#;
 
+const FOCUS_WINDOW_SCRIPT_TEMPLATE: &str = r#"
+if not (application "Ghostty" is running) then
+    error "Ghostty is not running" number 1001
+end if
+
+set target_window_id to "__WINDOW_ID__"
+
+tell application "Ghostty"
+    set matching_windows to every window whose id is target_window_id
+
+    if (count of matching_windows) is 0 then
+        error "Ghostty window not found" number 1002
+    end if
+
+    activate window (item 1 of matching_windows)
+end tell
+"#;
+
 #[derive(Debug, Clone)]
 pub struct GhosttyClient {
     verbose: bool,
@@ -85,6 +103,13 @@ impl GhosttyClient {
     pub fn query_windows(&self) -> Result<WindowInventory, Report<AppError>> {
         let stdout = self.run_query_script("query_windows", QUERY_WINDOWS_SCRIPT)?;
         parse_window_inventory(&stdout)
+    }
+
+    pub fn focus_window(&self, window_id: &str) -> Result<(), Report<AppError>> {
+        let script = FOCUS_WINDOW_SCRIPT_TEMPLATE
+            .replace("__WINDOW_ID__", &escape_applescript_string(window_id));
+        self.run_query_script("focus_window", &script)?;
+        Ok(())
     }
 
     fn run_query_script(
@@ -106,6 +131,10 @@ impl GhosttyClient {
 
         process_osascript_output(self.verbose, action_name, script, output)
     }
+}
+
+fn escape_applescript_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,7 +265,9 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Output;
 
-    use super::{AppError, GhosttyClient, parse_row, parse_window_inventory};
+    use super::{
+        AppError, GhosttyClient, escape_applescript_string, parse_row, parse_window_inventory,
+    };
 
     #[test]
     fn parses_single_window_single_tab_single_terminal() {
@@ -393,6 +424,33 @@ mod tests {
     fn empty_stdout_produces_empty_inventory() {
         let inventory = parse_window_inventory("").expect("empty inventory is valid");
         assert!(inventory.windows.is_empty());
+    }
+
+    #[test]
+    fn focus_window_failure_includes_status_and_stderr() {
+        let report = GhosttyClient::build_osascript_error_for_test(
+            "focus_window",
+            "focus script body",
+            Output {
+                status: std::process::ExitStatus::from_raw(256),
+                stdout: Vec::new(),
+                stderr: b"window not found".to_vec(),
+            },
+        )
+        .expect_err("should fail");
+
+        let rendered = format!("{report:?}");
+        assert!(rendered.contains("focus_window"));
+        assert!(rendered.contains("window not found"));
+        assert!(rendered.contains("status=exit status: 1"));
+    }
+
+    #[test]
+    fn escape_applescript_string_handles_quotes_and_backslashes() {
+        assert_eq!(
+            escape_applescript_string("window-\"path\"-\\-id"),
+            "window-\\\"path\\\"-\\\\-id"
+        );
     }
 
     #[test]

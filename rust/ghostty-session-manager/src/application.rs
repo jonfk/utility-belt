@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use error_stack::{Report, ResultExt};
+use jiff::Timestamp;
 use serde::Serialize;
 
 use crate::domain::{Tab, Terminal, Window, WindowInventory};
@@ -12,15 +13,79 @@ pub fn list_windows(
     ghostty: &GhosttyClient,
     state_store: &StateStore,
 ) -> Result<ListedWindows, Report<AppError>> {
-    let inventory = ghostty
-        .query_windows()
-        .change_context(AppError::Ghostty)
-        .attach("Failed to query Ghostty windows")?;
-    let state = state_store
-        .load()
-        .attach("Failed to load persisted Ghostty session state")?;
-
+    let (inventory, state) = load_inventory_and_state(ghostty, state_store)?;
     Ok(ListedWindows::from_live_and_state(&inventory, &state))
+}
+
+pub fn prepare_switch(
+    ghostty: &GhosttyClient,
+    state_store: &StateStore,
+) -> Result<SwitchContext, Report<AppError>> {
+    let (inventory, state) = load_inventory_and_state(ghostty, state_store)?;
+    let listed = ListedWindows::from_live_and_state(&inventory, &state);
+
+    if listed.windows.is_empty() {
+        return Err(Report::new(AppError::Ghostty).attach(
+            "Ghostty returned no windows to switch to; open a Ghostty window and try again",
+        ));
+    }
+
+    Ok(SwitchContext {
+        windows: listed
+            .windows
+            .iter()
+            .map(SwitchWindow::from_listed_window)
+            .collect(),
+        state,
+    })
+}
+
+pub fn complete_switch(
+    ghostty: &GhosttyClient,
+    state_store: &StateStore,
+    state: &mut StateFile,
+    selection: &SwitchWindow,
+) -> Result<(), Report<AppError>> {
+    ghostty
+        .focus_window(&selection.window_id)
+        .change_context(AppError::Ghostty)
+        .attach_with(|| format!("Failed to focus Ghostty window {}", selection.window_id))?;
+
+    if record_switch_selection(state, selection, Timestamp::now())? {
+        state_store
+            .save(state)
+            .attach("Failed to persist Ghostty session state after switching windows")?;
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchContext {
+    pub windows: Vec<SwitchWindow>,
+    pub state: StateFile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchWindow {
+    pub window_id: String,
+    pub project_path: Option<PathBuf>,
+    pub title: String,
+    pub detail: String,
+}
+
+impl SwitchWindow {
+    fn from_listed_window(window: &ListedWindow) -> Self {
+        let title = switch_title(window);
+        let detail = switch_detail(window);
+
+        Self {
+            window_id: window.window_id.clone(),
+            project_path: window.project_path.clone(),
+            title,
+            detail,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -79,7 +144,11 @@ impl ListedTab {
             tab_id: tab.tab_id.clone(),
             tab_name: tab.tab_name.clone(),
             index: tab.index,
-            terminals: tab.terminals.iter().map(ListedTerminal::from_live).collect(),
+            terminals: tab
+                .terminals
+                .iter()
+                .map(ListedTerminal::from_live)
+                .collect(),
         }
     }
 }
@@ -99,7 +168,72 @@ impl ListedTerminal {
     }
 }
 
-fn project_state_for_path(project_path: Option<&Path>, state: &StateFile) -> Option<ProjectStateRecord> {
+fn load_inventory_and_state(
+    ghostty: &GhosttyClient,
+    state_store: &StateStore,
+) -> Result<(WindowInventory, StateFile), Report<AppError>> {
+    let inventory = ghostty
+        .query_windows()
+        .change_context(AppError::Ghostty)
+        .attach("Failed to query Ghostty windows")?;
+    let state = state_store
+        .load()
+        .attach("Failed to load persisted Ghostty session state")?;
+
+    Ok((inventory, state))
+}
+
+fn switch_title(window: &ListedWindow) -> String {
+    if let Some(project_path) = &window.project_path {
+        return project_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| project_path.display().to_string());
+    }
+
+    window
+        .window_name
+        .clone()
+        .unwrap_or_else(|| "No project path".to_owned())
+}
+
+fn switch_detail(window: &ListedWindow) -> String {
+    match (&window.project_path, &window.window_name) {
+        (Some(project_path), Some(window_name)) => format!(
+            "{} | {} | {}",
+            project_path.display(),
+            window_name,
+            window.window_id
+        ),
+        (Some(project_path), None) => {
+            format!("{} | {}", project_path.display(), window.window_id)
+        }
+        (None, Some(window_name)) => {
+            format!("No project path | {} | {}", window_name, window.window_id)
+        }
+        (None, None) => format!("No project path | {}", window.window_id),
+    }
+}
+
+fn record_switch_selection(
+    state: &mut StateFile,
+    selection: &SwitchWindow,
+    selected_at: Timestamp,
+) -> Result<bool, Report<AppError>> {
+    let Some(project_path) = selection.project_path.as_deref() else {
+        return Ok(false);
+    };
+
+    state.record_project_access(project_path, selected_at)?;
+    Ok(true)
+}
+
+fn project_state_for_path(
+    project_path: Option<&Path>,
+    state: &StateFile,
+) -> Option<ProjectStateRecord> {
     let project_path = project_path?;
     let canonical_key = StateStore::canonical_project_key(project_path).ok()?;
     state.projects.get(&canonical_key).cloned()
@@ -115,7 +249,7 @@ mod tests {
 
     use jiff::Timestamp;
 
-    use super::ListedWindows;
+    use super::{ListedWindows, SwitchWindow, record_switch_selection};
     use crate::domain::{Tab, Terminal, Window, WindowInventory};
     use crate::state::{ProjectStateRecord, StateFile};
 
@@ -256,6 +390,56 @@ mod tests {
 
         assert_eq!(listed.windows[0].window_id, "window-2");
         assert_eq!(listed.windows[1].window_id, "window-1");
+    }
+
+    #[test]
+    fn recording_switch_selection_creates_or_updates_project_state() {
+        let temp_dir = unique_test_dir();
+        let project_dir = temp_dir.join("project");
+        fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+        let selection = SwitchWindow {
+            window_id: "window-1".to_owned(),
+            project_path: Some(project_dir.clone()),
+            title: "project".to_owned(),
+            detail: project_dir.display().to_string(),
+        };
+        let selected_at = parse_timestamp("2026-04-16T09:30:00Z");
+        let mut state = StateFile::empty();
+
+        let changed = record_switch_selection(&mut state, &selection, selected_at)
+            .expect("recording selection should succeed");
+
+        let key = project_dir
+            .canonicalize()
+            .expect("project dir should canonicalize")
+            .display()
+            .to_string();
+        assert!(changed);
+        assert_eq!(
+            state.projects.get(&key),
+            Some(&ProjectStateRecord {
+                last_accessed_at: selected_at,
+            })
+        );
+    }
+
+    #[test]
+    fn recording_pathless_switch_selection_leaves_state_unchanged() {
+        let selection = SwitchWindow {
+            window_id: "window-2".to_owned(),
+            project_path: None,
+            title: "No project path".to_owned(),
+            detail: "window-2".to_owned(),
+        };
+        let selected_at = parse_timestamp("2026-04-16T09:30:00Z");
+        let mut state = StateFile::empty();
+
+        let changed = record_switch_selection(&mut state, &selection, selected_at)
+            .expect("pathless selection should be ignored");
+
+        assert!(!changed);
+        assert_eq!(state, StateFile::empty());
     }
 
     fn unique_test_dir() -> PathBuf {

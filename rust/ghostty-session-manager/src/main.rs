@@ -4,6 +4,7 @@ mod domain;
 mod error;
 mod ghostty;
 mod state;
+mod tui;
 
 use clap::Parser;
 

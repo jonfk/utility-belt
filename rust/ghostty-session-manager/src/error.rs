@@ -16,4 +16,7 @@ pub enum AppError {
 
     #[error("State storage failed")]
     State,
+
+    #[error("Terminal UI failed")]
+    Tui,
 }

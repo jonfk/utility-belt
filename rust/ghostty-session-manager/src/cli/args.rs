@@ -21,4 +21,6 @@ pub enum Command {
         #[arg(long, help = "Render the live inventory as JSON")]
         json: bool,
     },
+    /// Open an interactive picker and focus a Ghostty window
+    Switch,
 }
