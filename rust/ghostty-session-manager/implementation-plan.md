@@ -29,6 +29,17 @@ The following pieces are already implemented:
 - Cached picker rows built from persisted project records.
 - MRU ordering for cached switch rows using `last_accessed_at`.
 - Deterministic tie-breaking for equal MRU timestamps by canonical project key.
+- Dedicated `search.rs` module for cached project ranking.
+- `frizbee`-backed fuzzy ranking over persisted project records.
+- Case-insensitive query normalization for cached ranking.
+- Ranking heuristics for cached project records:
+  - exact basename match
+  - exact full-path match
+  - basename prefix match
+  - basename-hit preference over full-path hits when the basename score is stronger
+  - fuzzy score
+  - MRU weighting
+  - canonical project key tie-breaking
 - Basic `ratatui` switcher with:
   - browse-only list
   - selection movement
@@ -40,8 +51,8 @@ The following pieces are already implemented:
 
 The following pieces are not implemented yet:
 
-- Typed search or ranking inside the switcher.
-- `frizbee` integration or a dedicated `search.rs` module.
+- Typed search inside the switcher.
+- Wiring cached search/ranking into the picker UI.
 - One-shot background live reconciliation while the picker is open.
 - Selection fallback from stale cached ids to live resolution by project path.
 - Explicit stale-record pruning or richer project identity reconciliation.
@@ -66,8 +77,8 @@ Today the command behavior is:
   - records `last_accessed_at` and cached window hints for the selected project
 
 That means `switch` now uses a stale-first cached path. Live reconciliation
-while the picker is open and fallback from stale cached window ids are still
-deferred to later phases.
+while the picker is open, typed filtering in the picker, and fallback from
+stale cached window ids are still deferred to later phases.
 
 ## Completed Work
 
@@ -136,25 +147,45 @@ Verification already in code:
 - Application tests cover the empty-live-seed no-windows error path.
 - Manual Ghostty smoke tests have not yet been recorded in this plan.
 
-## Remaining Work
-
 ### Phase 3: Add Search And Ranking
 
-Implement the pure Rust search path before wiring it into the UI.
+Phase 3 is now implemented.
 
-- Add a dedicated search/ranking module.
-- Rank using cached project records rather than requiring live window rows.
-- Start with:
-  - fuzzy path matching
-  - basename preference
-  - MRU weighting
-- Define deterministic tie-breaking.
+- Added a dedicated `search.rs` module.
+- Added `frizbee` as the fuzzy-matching backend.
+- Search ranks cached project records rather than requiring live window rows.
+- Query normalization now:
+  - trims surrounding whitespace
+  - lowercases query and candidate strings
+  - treats an empty query as "show all"
+- Ranking now combines:
+  - exact basename match
+  - exact full-path match
+  - basename prefix match
+  - basename-hit preference when the basename fuzzy score beats the full-path score
+  - best fuzzy score
+  - `last_accessed_at` descending
+  - canonical project key ascending for deterministic tie-breaking
+- Empty queries return all project keys in the same MRU order used by cached
+  switch rows.
+- This phase is intentionally not wired into the TUI yet. The `switch`
+  command remains browse-only until phase 4.
 
 Verification:
 
-- Table-driven tests cover basename matches, partial path matches, MRU boosts,
-  and tie-breaking.
-- A realistic fixture test covers ranking across a mixed project set.
+- Search tests cover:
+  - exact basename matches beating deeper full-path fuzzy matches
+  - basename prefix matches beating weaker full-path matches
+  - partial path queries
+  - MRU boosts
+  - canonical project key tie-breaking
+  - empty-query ordering
+  - no-match queries
+- A realistic mixed-project fixture covers exact, prefix, and path-oriented
+  queries across similar project names.
+- `cargo test` passes with the new search module.
+
+## Remaining Work
 
 ### Phase 4: Plug Search Into The TUI
 
@@ -233,11 +264,10 @@ Verification:
 
 The remaining work can be shipped in this order:
 
-1. Phase 3
-2. Phase 4
-3. Phase 5
-4. Phase 6
-5. Phase 7
+1. Phase 4
+2. Phase 5
+3. Phase 6
+4. Phase 7
 
 That order keeps the fast-path switch work ahead of the more subtle live
 reconciliation and cache-hygiene work.

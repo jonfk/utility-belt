@@ -4,6 +4,7 @@ mod debug_profile;
 mod domain;
 mod error;
 mod ghostty;
+mod search;
 mod state;
 mod tui;
 

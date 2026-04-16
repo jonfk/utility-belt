@@ -7,6 +7,7 @@ edition = "2024"
 clap = { version = "4.6.1", features = ["derive"] }
 crossterm = "0.29.0"
 error-stack = "0.7.0"
+frizbee = "0.9.0"
 jiff = { version = "0.2.23", features = ["serde"] }
 ratatui = "0.29.0"
 serde = { version = "1.0.228", features = ["derive"] }
