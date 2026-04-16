@@ -53,6 +53,8 @@ pub fn complete_switch(
     state_store: &StateStore,
     state: &mut StateFile,
     selection: &SwitchWindow,
+    latest_live_inventory: Option<&WindowInventory>,
+    pending_state_save: bool,
 ) -> Result<(), Report<AppError>> {
     let span = info_span!(
         "application.complete_switch",
@@ -60,12 +62,26 @@ pub fn complete_switch(
         has_project_path = selection.project_path.is_some()
     );
     let _enter = span.enter();
-    ghostty
-        .focus_window(&selection.window_id)
-        .change_context(AppError::Ghostty)
-        .attach_with(|| format!("Failed to focus Ghostty window {}", selection.window_id))?;
+    let should_save = complete_switch_with_fallback(
+        state,
+        selection,
+        latest_live_inventory,
+        pending_state_save,
+        |window_id| {
+            ghostty
+                .focus_window(window_id)
+                .change_context(AppError::Ghostty)
+                .attach_with(|| format!("Failed to focus Ghostty window {window_id}"))
+        },
+        || {
+            ghostty
+                .query_windows()
+                .change_context(AppError::Ghostty)
+                .attach("Failed to query Ghostty windows")
+        },
+    )?;
 
-    if record_switch_selection(state, selection, Timestamp::now())? {
+    if should_save {
         state_store
             .save(state)
             .attach("Failed to persist Ghostty session state after switching windows")?;
@@ -78,6 +94,7 @@ pub fn complete_switch(
 pub struct SwitchContext {
     pub windows: Vec<SwitchWindow>,
     pub state: StateFile,
+    pub seeded_from_live: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,16 +116,19 @@ where
     let mut state = state_store
         .load()
         .attach("Failed to load persisted Ghostty session state")?;
+    let mut seeded_from_live = false;
 
     if state.projects.is_empty() {
         let inventory = load_inventory()?;
-        let observed_at = Timestamp::now();
+        let refresh = reconcile_switch_inventory(&mut state, &inventory, Timestamp::now())?;
 
-        if state.refresh_from_inventory(&inventory, observed_at)? {
+        if refresh.changed {
             state_store.save(&state).attach(
                 "Failed to persist refreshed Ghostty session state after seeding switch cache",
             )?;
         }
+
+        seeded_from_live = true;
     }
 
     let windows = switch_windows_from_state(&state);
@@ -118,7 +138,11 @@ where
         ));
     }
 
-    Ok(SwitchContext { windows, state })
+    Ok(SwitchContext {
+        windows,
+        state,
+        seeded_from_live,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -222,6 +246,23 @@ fn switch_windows_from_state(state: &StateFile) -> Vec<SwitchWindow> {
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchRefresh {
+    pub windows: Vec<SwitchWindow>,
+    pub changed: bool,
+}
+
+pub fn reconcile_switch_inventory(
+    state: &mut StateFile,
+    inventory: &WindowInventory,
+    observed_at: Timestamp,
+) -> Result<SwitchRefresh, Report<AppError>> {
+    let changed = state.refresh_from_inventory(inventory, observed_at)?;
+    let windows = switch_windows_from_state(state);
+
+    Ok(SwitchRefresh { windows, changed })
+}
+
 fn switch_window_from_project_state(
     project_key: &str,
     project_state: &ProjectStateRecord,
@@ -278,6 +319,83 @@ fn record_switch_selection(
     )
 }
 
+fn complete_switch_with_fallback<FFocus, FLoad>(
+    state: &mut StateFile,
+    selection: &SwitchWindow,
+    latest_live_inventory: Option<&WindowInventory>,
+    pending_state_save: bool,
+    mut focus_window: FFocus,
+    load_inventory: FLoad,
+) -> Result<bool, Report<AppError>>
+where
+    FFocus: FnMut(&str) -> Result<(), Report<AppError>>,
+    FLoad: FnOnce() -> Result<WindowInventory, Report<AppError>>,
+{
+    let selected_at = Timestamp::now();
+
+    match focus_window(&selection.window_id) {
+        Ok(()) => {
+            let changed = record_switch_selection(state, selection, selected_at)?;
+            return Ok(pending_state_save || changed);
+        }
+        Err(cached_focus_error) => {
+            let Some(project_path) = selection.project_path.as_deref() else {
+                return Err(cached_focus_error);
+            };
+
+            let live_inventory = match latest_live_inventory.cloned() {
+                Some(live_inventory) => live_inventory,
+                None => load_inventory()?,
+            };
+
+            let Some(resolved_selection) =
+                resolve_live_selection_by_project_path(project_path, &live_inventory)?
+            else {
+                return Err(Report::new(AppError::Ghostty)
+                    .attach("Cached Ghostty window was not live and no matching live project window was found")
+                    .attach(format!("project_path={}", project_path.display()))
+                    .attach(format!("cached_window_id={}", selection.window_id))
+                    .attach(format!("cached_focus_error={cached_focus_error:?}")));
+            };
+
+            focus_window(&resolved_selection.window_id)?;
+
+            let refreshed = state.refresh_from_inventory(&live_inventory, selected_at)?;
+            let recorded = record_switch_selection(state, &resolved_selection, selected_at)?;
+
+            Ok(pending_state_save || refreshed || recorded)
+        }
+    }
+}
+
+fn resolve_live_selection_by_project_path(
+    project_path: &Path,
+    inventory: &WindowInventory,
+) -> Result<Option<SwitchWindow>, Report<AppError>> {
+    let selected_project_key = StateStore::canonical_project_key(project_path)?;
+
+    Ok(inventory.windows.iter().find_map(|window| {
+        let live_project_path = window.project_path.as_deref()?;
+        let live_project_key = StateStore::canonical_project_key(live_project_path).ok()?;
+
+        if live_project_key == selected_project_key {
+            Some(SwitchWindow {
+                window_id: window.window_id.clone(),
+                window_name: window.window_name.clone(),
+                project_path: Some(PathBuf::from(&selected_project_key)),
+                title: switch_title_from_project_path(Path::new(&selected_project_key)),
+                detail: switch_detail_from_project_state(
+                    &selected_project_key,
+                    window.window_name.as_deref(),
+                    &window.window_id,
+                ),
+            })
+        } else {
+            None
+        }
+    }))
+}
+
 fn project_state_for_path(
     project_path: Option<&Path>,
     state: &StateFile,
@@ -295,10 +413,12 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use error_stack::Report;
     use jiff::Timestamp;
 
     use super::{
-        ListedWindows, SwitchWindow, prepare_switch_with_inventory_loader, record_switch_selection,
+        ListedWindows, SwitchWindow, complete_switch_with_fallback,
+        prepare_switch_with_inventory_loader, reconcile_switch_inventory, record_switch_selection,
         switch_window_from_project_state, switch_windows_from_state,
     };
     use crate::domain::{Tab, Terminal, Window, WindowInventory};
@@ -716,6 +836,7 @@ mod tests {
         })
         .expect("cached switch context should build");
 
+        assert!(!context.seeded_from_live);
         assert_eq!(context.state, state);
         assert_eq!(context.windows, switch_windows_from_state(&context.state));
     }
@@ -746,6 +867,7 @@ mod tests {
             .expect("seeded switch context should build");
         let persisted = store.load().expect("seeded state should load");
 
+        assert!(context.seeded_from_live);
         assert_eq!(context.state, persisted);
         assert_eq!(context.windows, switch_windows_from_state(&context.state));
         assert_eq!(context.windows.len(), 1);
@@ -772,6 +894,376 @@ mod tests {
 
         let rendered = format!("{report:?}");
         assert!(rendered.contains("Ghostty returned no windows to switch to"));
+    }
+
+    #[test]
+    fn reconcile_switch_inventory_rebuilds_cached_windows_from_updated_state() {
+        let temp_dir = unique_test_dir();
+        let project_a = temp_dir.join("project-a");
+        let project_b = temp_dir.join("project-b");
+        fs::create_dir_all(&project_a).expect("project a should exist");
+        fs::create_dir_all(&project_b).expect("project b should exist");
+        let mut state = StateFile {
+            version: 1,
+            projects: BTreeMap::from([(
+                project_a
+                    .canonicalize()
+                    .expect("project a should canonicalize")
+                    .display()
+                    .to_string(),
+                ProjectStateRecord {
+                    last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                    last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                    last_window_id: "window-a".to_owned(),
+                    last_window_name: Some("Workspace A".to_owned()),
+                },
+            )]),
+        };
+        let inventory = WindowInventory::from_windows(vec![Window {
+            window_id: "window-b".to_owned(),
+            window_name: Some("Workspace B".to_owned()),
+            project_path: Some(project_b.clone()),
+            tabs: vec![Tab {
+                tab_id: "tab-1".to_owned(),
+                tab_name: Some("Editor".to_owned()),
+                index: 1,
+                terminals: vec![Terminal {
+                    terminal_id: "terminal-1".to_owned(),
+                    working_directory: Some(project_b.clone()),
+                }],
+            }],
+        }]);
+
+        let refresh = reconcile_switch_inventory(
+            &mut state,
+            &inventory,
+            parse_timestamp("2026-04-16T12:00:00Z"),
+        )
+        .expect("refresh should succeed");
+
+        assert!(refresh.changed);
+        assert_eq!(
+            refresh
+                .windows
+                .iter()
+                .map(|window| window
+                    .project_path
+                    .as_ref()
+                    .expect("project path")
+                    .display()
+                    .to_string())
+                .collect::<Vec<_>>(),
+            vec![
+                project_b
+                    .canonicalize()
+                    .expect("project b should canonicalize")
+                    .display()
+                    .to_string(),
+                project_a
+                    .canonicalize()
+                    .expect("project a should canonicalize")
+                    .display()
+                    .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn reconcile_switch_inventory_updates_last_seen_without_touching_last_accessed() {
+        let temp_dir = unique_test_dir();
+        let project_a = temp_dir.join("project-a");
+        fs::create_dir_all(&project_a).expect("project a should exist");
+        let project_key = project_a
+            .canonicalize()
+            .expect("project a should canonicalize")
+            .display()
+            .to_string();
+        let mut state = StateFile {
+            version: 1,
+            projects: BTreeMap::from([(
+                project_key.clone(),
+                ProjectStateRecord {
+                    last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                    last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                    last_window_id: "window-a".to_owned(),
+                    last_window_name: Some("Workspace A".to_owned()),
+                },
+            )]),
+        };
+        let inventory = WindowInventory::from_windows(vec![Window {
+            window_id: "window-a".to_owned(),
+            window_name: Some("Workspace A".to_owned()),
+            project_path: Some(project_a.clone()),
+            tabs: vec![Tab {
+                tab_id: "tab-1".to_owned(),
+                tab_name: Some("Editor".to_owned()),
+                index: 1,
+                terminals: vec![Terminal {
+                    terminal_id: "terminal-1".to_owned(),
+                    working_directory: Some(project_a.clone()),
+                }],
+            }],
+        }]);
+
+        let refresh = reconcile_switch_inventory(
+            &mut state,
+            &inventory,
+            parse_timestamp("2026-04-16T12:00:00Z"),
+        )
+        .expect("refresh should succeed");
+
+        assert!(refresh.changed);
+        assert_eq!(
+            state.projects[&project_key].last_accessed_at,
+            parse_timestamp("2026-04-16T10:00:00Z")
+        );
+        assert_eq!(
+            state.projects[&project_key].last_seen_at,
+            parse_timestamp("2026-04-16T12:00:00Z")
+        );
+    }
+
+    #[test]
+    fn complete_switch_falls_back_to_prefetched_live_inventory() {
+        let temp_dir = unique_test_dir();
+        let project_a = temp_dir.join("project-a");
+        fs::create_dir_all(&project_a).expect("project a should exist");
+        let project_key = project_a
+            .canonicalize()
+            .expect("project a should canonicalize")
+            .display()
+            .to_string();
+        let mut state = StateFile::empty();
+        let selection = SwitchWindow {
+            window_id: "stale-window".to_owned(),
+            window_name: Some("Cached".to_owned()),
+            project_path: Some(project_a.clone()),
+            title: "project-a".to_owned(),
+            detail: format!("{} | stale-window", project_a.display()),
+        };
+        let inventory = WindowInventory::from_windows(vec![Window {
+            window_id: "live-window".to_owned(),
+            window_name: Some("Live".to_owned()),
+            project_path: Some(project_a.clone()),
+            tabs: vec![Tab {
+                tab_id: "tab-1".to_owned(),
+                tab_name: Some("Editor".to_owned()),
+                index: 1,
+                terminals: vec![Terminal {
+                    terminal_id: "terminal-1".to_owned(),
+                    working_directory: Some(project_a.clone()),
+                }],
+            }],
+        }]);
+        let mut focused_windows = Vec::new();
+
+        let should_save = complete_switch_with_fallback(
+            &mut state,
+            &selection,
+            Some(&inventory),
+            false,
+            |window_id| {
+                focused_windows.push(window_id.to_owned());
+                if window_id == "stale-window" {
+                    Err(Report::new(crate::error::AppError::Ghostty)
+                        .attach("cached window missing"))
+                } else {
+                    Ok(())
+                }
+            },
+            || panic!("live inventory should not be loaded when prefetched inventory exists"),
+        )
+        .expect("fallback should succeed");
+
+        assert!(should_save);
+        assert_eq!(
+            focused_windows,
+            vec!["stale-window".to_owned(), "live-window".to_owned()]
+        );
+        assert_eq!(state.projects[&project_key].last_window_id, "live-window");
+        assert_eq!(
+            state.projects[&project_key].last_window_name.as_deref(),
+            Some("Live")
+        );
+    }
+
+    #[test]
+    fn complete_switch_runs_live_query_when_no_prefetched_inventory_is_available() {
+        let temp_dir = unique_test_dir();
+        let project_a = temp_dir.join("project-a");
+        fs::create_dir_all(&project_a).expect("project a should exist");
+        let mut state = StateFile::empty();
+        let selection = SwitchWindow {
+            window_id: "stale-window".to_owned(),
+            window_name: Some("Cached".to_owned()),
+            project_path: Some(project_a.clone()),
+            title: "project-a".to_owned(),
+            detail: format!("{} | stale-window", project_a.display()),
+        };
+        let inventory = WindowInventory::from_windows(vec![Window {
+            window_id: "live-window".to_owned(),
+            window_name: Some("Live".to_owned()),
+            project_path: Some(project_a.clone()),
+            tabs: vec![Tab {
+                tab_id: "tab-1".to_owned(),
+                tab_name: Some("Editor".to_owned()),
+                index: 1,
+                terminals: vec![Terminal {
+                    terminal_id: "terminal-1".to_owned(),
+                    working_directory: Some(project_a.clone()),
+                }],
+            }],
+        }]);
+        let mut queries = 0;
+
+        let should_save = complete_switch_with_fallback(
+            &mut state,
+            &selection,
+            None,
+            false,
+            |window_id| {
+                if window_id == "stale-window" {
+                    Err(Report::new(crate::error::AppError::Ghostty)
+                        .attach("cached window missing"))
+                } else {
+                    Ok(())
+                }
+            },
+            || {
+                queries += 1;
+                Ok(inventory.clone())
+            },
+        )
+        .expect("fallback should succeed");
+
+        assert!(should_save);
+        assert_eq!(queries, 1);
+    }
+
+    #[test]
+    fn complete_switch_fallback_uses_first_live_match_in_inventory_order() {
+        let temp_dir = unique_test_dir();
+        let project_a = temp_dir.join("project-a");
+        fs::create_dir_all(&project_a).expect("project a should exist");
+        let project_key = project_a
+            .canonicalize()
+            .expect("project a should canonicalize")
+            .display()
+            .to_string();
+        let mut state = StateFile::empty();
+        let selection = SwitchWindow {
+            window_id: "stale-window".to_owned(),
+            window_name: Some("Cached".to_owned()),
+            project_path: Some(project_a.clone()),
+            title: "project-a".to_owned(),
+            detail: format!("{} | stale-window", project_a.display()),
+        };
+        let inventory = WindowInventory::from_windows(vec![
+            Window {
+                window_id: "live-window-2".to_owned(),
+                window_name: Some("Second".to_owned()),
+                project_path: Some(project_a.clone()),
+                tabs: vec![Tab {
+                    tab_id: "tab-2".to_owned(),
+                    tab_name: Some("Shell".to_owned()),
+                    index: 1,
+                    terminals: vec![Terminal {
+                        terminal_id: "terminal-2".to_owned(),
+                        working_directory: Some(project_a.clone()),
+                    }],
+                }],
+            },
+            Window {
+                window_id: "live-window-1".to_owned(),
+                window_name: Some("First".to_owned()),
+                project_path: Some(project_a.clone()),
+                tabs: vec![Tab {
+                    tab_id: "tab-1".to_owned(),
+                    tab_name: Some("Editor".to_owned()),
+                    index: 1,
+                    terminals: vec![Terminal {
+                        terminal_id: "terminal-1".to_owned(),
+                        working_directory: Some(project_a.clone()),
+                    }],
+                }],
+            },
+        ]);
+        let mut focused_windows = Vec::new();
+
+        complete_switch_with_fallback(
+            &mut state,
+            &selection,
+            Some(&inventory),
+            false,
+            |window_id| {
+                focused_windows.push(window_id.to_owned());
+                if window_id == "stale-window" {
+                    Err(Report::new(crate::error::AppError::Ghostty)
+                        .attach("cached window missing"))
+                } else {
+                    Ok(())
+                }
+            },
+            || panic!("should use prefetched inventory"),
+        )
+        .expect("fallback should succeed");
+
+        assert_eq!(
+            focused_windows,
+            vec!["stale-window".to_owned(), "live-window-2".to_owned()]
+        );
+        assert_eq!(state.projects[&project_key].last_window_id, "live-window-2");
+    }
+
+    #[test]
+    fn complete_switch_fallback_returns_error_when_no_live_match_exists() {
+        let temp_dir = unique_test_dir();
+        let project_a = temp_dir.join("project-a");
+        let project_b = temp_dir.join("project-b");
+        fs::create_dir_all(&project_a).expect("project a should exist");
+        fs::create_dir_all(&project_b).expect("project b should exist");
+        let mut state = StateFile::empty();
+        let selection = SwitchWindow {
+            window_id: "stale-window".to_owned(),
+            window_name: Some("Cached".to_owned()),
+            project_path: Some(project_a.clone()),
+            title: "project-a".to_owned(),
+            detail: format!("{} | stale-window", project_a.display()),
+        };
+        let inventory = WindowInventory::from_windows(vec![Window {
+            window_id: "other-window".to_owned(),
+            window_name: Some("Other".to_owned()),
+            project_path: Some(project_b.clone()),
+            tabs: vec![Tab {
+                tab_id: "tab-1".to_owned(),
+                tab_name: Some("Editor".to_owned()),
+                index: 1,
+                terminals: vec![Terminal {
+                    terminal_id: "terminal-1".to_owned(),
+                    working_directory: Some(project_b.clone()),
+                }],
+            }],
+        }]);
+
+        let report = complete_switch_with_fallback(
+            &mut state,
+            &selection,
+            Some(&inventory),
+            false,
+            |window_id| {
+                if window_id == "stale-window" {
+                    Err(Report::new(crate::error::AppError::Ghostty)
+                        .attach("cached window missing"))
+                } else {
+                    Ok(())
+                }
+            },
+            || panic!("should use prefetched inventory"),
+        )
+        .expect_err("fallback should fail");
+
+        let rendered = format!("{report:?}");
+        assert!(rendered.contains("no matching live project window was found"));
     }
 
     fn unique_test_dir() -> PathBuf {

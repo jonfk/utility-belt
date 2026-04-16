@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::io;
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::time::Duration;
 
 use crossterm::{
     cursor,
@@ -22,6 +24,12 @@ use crate::error::AppError;
 use crate::search::rank_project_keys;
 use crate::state::ProjectStateRecord;
 
+#[derive(Debug)]
+pub enum RefreshMessage {
+    Success(crate::domain::WindowInventory),
+    Failure(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickerEntry {
     pub project_key: String,
@@ -34,6 +42,12 @@ pub struct PickerEntry {
 pub enum PickerOutcome {
     Confirm(PickerEntry),
     Cancel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickerRefresh {
+    pub entries: Vec<PickerEntry>,
+    pub projects: BTreeMap<String, ProjectStateRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +140,18 @@ impl PickerState {
         }
     }
 
+    pub fn apply_refresh(
+        &mut self,
+        entries: Vec<PickerEntry>,
+        projects: &BTreeMap<String, ProjectStateRecord>,
+    ) {
+        self.entries_by_project_key = entries
+            .into_iter()
+            .map(|entry| (entry.project_key.clone(), entry))
+            .collect();
+        self.refresh_filtered_projects(projects);
+    }
+
     fn selected_entry(&self) -> Option<&PickerEntry> {
         let selected_project_key = self.selected_project_key.as_ref()?;
         self.entries_by_project_key.get(selected_project_key)
@@ -155,6 +181,10 @@ impl PickerState {
 pub fn run_picker(
     entries: Vec<PickerEntry>,
     projects: &BTreeMap<String, ProjectStateRecord>,
+    mut refresh_receiver: Option<Receiver<RefreshMessage>>,
+    mut apply_refresh: impl FnMut(
+        crate::domain::WindowInventory,
+    ) -> Result<PickerRefresh, Report<AppError>>,
     command_span: &tracing::Span,
     run_span: &tracing::Span,
 ) -> Result<PickerOutcome, Report<AppError>> {
@@ -187,6 +217,23 @@ pub fn run_picker(
     let mut state = PickerState::new(entries, projects);
 
     loop {
+        if let Some(receiver) = refresh_receiver.as_ref() {
+            match receiver.try_recv() {
+                Ok(RefreshMessage::Success(inventory)) => {
+                    let refresh = apply_refresh(inventory)?;
+                    state.apply_refresh(refresh.entries, &refresh.projects);
+                    refresh_receiver = None;
+                }
+                Ok(RefreshMessage::Failure(_error)) => {
+                    refresh_receiver = None;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    refresh_receiver = None;
+                }
+            }
+        }
+
         {
             let _command_enter = command_span.enter();
             let _run_enter = run_span.enter();
@@ -202,7 +249,9 @@ pub fn run_picker(
                 .attach("Failed to draw switch picker")?;
         }
 
-        let key_event = read_key_event()?;
+        let Some(key_event) = poll_key_event(Duration::from_millis(50))? else {
+            continue;
+        };
 
         if let Some(outcome) = {
             let _command_enter = command_span.enter();
@@ -226,18 +275,25 @@ impl Drop for TerminalCleanup {
     }
 }
 
-fn read_key_event() -> Result<KeyEvent, Report<AppError>> {
-    loop {
-        let event = event::read()
-            .change_context(AppError::Tui)
-            .attach("Failed to read terminal events for switch picker")?;
+fn poll_key_event(timeout: Duration) -> Result<Option<KeyEvent>, Report<AppError>> {
+    let has_event = event::poll(timeout)
+        .change_context(AppError::Tui)
+        .attach("Failed to poll terminal events for switch picker")?;
+    if !has_event {
+        return Ok(None);
+    }
 
-        if let Event::Key(key_event) = event {
-            if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                return Ok(key_event);
-            }
+    let event = event::read()
+        .change_context(AppError::Tui)
+        .attach("Failed to read terminal events for switch picker")?;
+
+    if let Event::Key(key_event) = event {
+        if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return Ok(Some(key_event));
         }
     }
+
+    Ok(None)
 }
 
 fn handle_key_event(
@@ -512,6 +568,147 @@ mod tests {
         );
 
         assert_eq!(state.query(), "");
+    }
+
+    #[test]
+    fn apply_refresh_preserves_query() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+        for character in "project-c".chars() {
+            state.append_query_char(character, &projects);
+        }
+
+        state.apply_refresh(sample_entries(), &projects);
+
+        assert_eq!(state.query(), "project-c");
+        assert_eq!(
+            state
+                .filtered_entries()
+                .into_iter()
+                .map(|entry| entry.project_key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/tmp/project-c"]
+        );
+    }
+
+    #[test]
+    fn apply_refresh_preserves_selection_when_selected_project_still_exists() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+        state.move_down();
+
+        state.apply_refresh(sample_entries(), &projects);
+
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(PickerEntry {
+                project_key: "/tmp/project-a".to_owned(),
+                window_id: "window-1".to_owned(),
+                title: "project-a".to_owned(),
+                detail: "/tmp/project-a | window-1".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn apply_refresh_falls_back_to_first_filtered_result_when_selected_project_disappears() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+        state.move_down();
+
+        state.apply_refresh(
+            vec![
+                PickerEntry {
+                    project_key: "/tmp/project-b".to_owned(),
+                    window_id: "window-2".to_owned(),
+                    title: "project-b".to_owned(),
+                    detail: "/tmp/project-b | window-2".to_owned(),
+                },
+                PickerEntry {
+                    project_key: "/tmp/project-c".to_owned(),
+                    window_id: "window-3".to_owned(),
+                    title: "project-c".to_owned(),
+                    detail: "/tmp/project-c | window-3".to_owned(),
+                },
+            ],
+            &projects,
+        );
+
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(PickerEntry {
+                project_key: "/tmp/project-c".to_owned(),
+                window_id: "window-3".to_owned(),
+                title: "project-c".to_owned(),
+                detail: "/tmp/project-c | window-3".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn apply_refresh_can_add_new_projects_without_breaking_filtered_ordering() {
+        let mut projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+
+        projects.insert(
+            "/tmp/project-d".to_owned(),
+            project_record("2026-04-16T12:00:00Z"),
+        );
+        state.apply_refresh(
+            vec![
+                PickerEntry {
+                    project_key: "/tmp/project-a".to_owned(),
+                    window_id: "window-1".to_owned(),
+                    title: "project-a".to_owned(),
+                    detail: "/tmp/project-a | window-1".to_owned(),
+                },
+                PickerEntry {
+                    project_key: "/tmp/project-b".to_owned(),
+                    window_id: "window-2".to_owned(),
+                    title: "project-b".to_owned(),
+                    detail: "/tmp/project-b | window-2".to_owned(),
+                },
+                PickerEntry {
+                    project_key: "/tmp/project-c".to_owned(),
+                    window_id: "window-3".to_owned(),
+                    title: "project-c".to_owned(),
+                    detail: "/tmp/project-c | window-3".to_owned(),
+                },
+                PickerEntry {
+                    project_key: "/tmp/project-d".to_owned(),
+                    window_id: "window-4".to_owned(),
+                    title: "project-d".to_owned(),
+                    detail: "/tmp/project-d | window-4".to_owned(),
+                },
+            ],
+            &projects,
+        );
+
+        assert_eq!(
+            state
+                .filtered_entries()
+                .into_iter()
+                .map(|entry| entry.project_key.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "/tmp/project-d",
+                "/tmp/project-c",
+                "/tmp/project-a",
+                "/tmp/project-b",
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_refresh_keeps_empty_state_behavior() {
+        let projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), &projects);
+        state.append_query_char('z', &projects);
+
+        state.apply_refresh(sample_entries(), &projects);
+
+        assert_eq!(state.selected_index(), None);
+        assert_eq!(state.confirm(), PickerOutcome::Cancel);
     }
 
     fn sample_entries() -> Vec<PickerEntry> {

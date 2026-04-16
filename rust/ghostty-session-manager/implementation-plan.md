@@ -48,14 +48,16 @@ The following pieces are already implemented:
   - empty-state rendering when no cached projects match
   - confirm
   - cancel
+- One-shot background live reconciliation while the picker is open.
+- Query/selection-preserving live refresh merges in the picker.
+- Stale cached window-id fallback to live project-path resolution during
+  switch completion.
 - Updating MRU state after a successful switch.
 - Updating cached window hints after a successful switch.
 - Debug timing output via `--debug`.
 
 The following pieces are not implemented yet:
 
-- One-shot background live reconciliation while the picker is open.
-- Selection fallback from stale cached ids to live resolution by project path.
 - Explicit stale-record pruning or richer project identity reconciliation.
 
 ## Current Behavior
@@ -75,15 +77,19 @@ Today the command behavior is:
   - if the state file is empty, performs a one-time live Ghostty query to seed state
   - starts with cached rows ordered by MRU with deterministic tie-breaking
   - updates filtered results as the user types, using cached ranking from `search.rs`
+  - starts at most one background live Ghostty refresh while the picker is open
+  - merges refreshed cached rows into the picker without losing the current query or selection
   - preserves the current selection when the selected project remains in the filtered set
   - falls back to the first filtered result when the previous selection disappears
   - shows an empty state when the current query has no cached matches
-  - focuses the selected window
+  - attempts to focus the selected cached window id first
+  - if the cached window id is stale, falls back to live resolution by canonical project path
+  - when multiple live windows match a stale cached project, chooses the first live match in inventory order
   - records `last_accessed_at` and cached window hints for the selected project
 
 That means `switch` now uses a stale-first cached path. Live reconciliation
-while the picker is open and fallback from stale cached window ids are still
-deferred to later phases.
+and stale-id recovery are now implemented, while identity/canonicalization edge
+cases and stale-record cleanup are still deferred to later phases.
 
 ## Completed Work
 
@@ -235,28 +241,54 @@ Verification:
   - cancel behavior
 - `cargo test` passes with the phase 4 picker changes.
 
-## Remaining Work
-
 ### Phase 5: Add One-Shot Live Reconciliation
 
-Recover freshness without moving back to a query-before-render model.
+Phase 5 is now implemented.
 
-- Start at most one live `query_windows` refresh while the switcher is open.
-- Merge live results into the in-memory picker state.
-- Update rows in place where practical so the UI does not jump around more than
-  necessary.
-- Persist refreshed hints after a successful live merge.
-- On selection, try cached `last_window_id` first and fall back to live
-  resolution by project path when needed.
+- `SwitchContext` now tracks whether the current switch session was already
+  seeded from live Ghostty data so the picker can skip a redundant background
+  refresh.
+- `switch` now starts at most one background `query_windows` refresh while the
+  picker is open when startup did not already seed from live data.
+- The picker loop now polls both terminal input and the one-shot refresh
+  channel, keeping the UI responsive while waiting for live data.
+- Live reconciliation now:
+  - refreshes persisted cached hints from live inventory
+  - rebuilds cached project rows from updated state
+  - reapplies the current query
+  - preserves the selected project key when still present
+  - otherwise falls back to the first filtered result or clears selection
+- Cancel now persists state once when a background live refresh changed the
+  cached switch index.
+- `complete_switch` now supports stale-id fallback:
+  - tries the cached `last_window_id` first
+  - uses the prefetched live inventory when available, otherwise performs one
+    synchronous `query_windows`
+  - resolves live matches by canonical project path
+  - focuses the first matching live window in inventory order when the cached
+    id is stale
+  - refreshes cached hints and records project access after a recovered switch
+  - returns a clear error when no live project match exists
+- Picker rows remain project-scoped in this phase. Duplicate live windows are
+  not surfaced as separate rows in the UI.
 
 Verification:
 
-- State-oriented tests cover applying live refresh results without losing the
-  active query or selection.
-- Unit tests cover fallback from stale cached window id to live project-path
-  resolution.
-- Manual smoke test: cached rows appear first and reconcile cleanly once live
-  data arrives.
+- TUI tests now cover:
+  - applying a live refresh without losing the active query
+  - preserving or falling back selection correctly after a refresh
+  - introducing newly discovered cached projects without breaking filtered ordering
+  - keeping empty-state behavior correct after refresh
+- Application tests now cover:
+  - reconciling live inventory back into cached switch rows
+  - updating `last_seen_at` without changing `last_accessed_at`
+  - stale-id fallback using prefetched live inventory
+  - stale-id fallback performing one synchronous live query when needed
+  - unique and duplicate live-match resolution
+  - clear failure when no live project match exists
+- `cargo test` passes with the phase 5 reconciliation and fallback changes.
+
+## Remaining Work
 
 ### Phase 6: Improve Identity And Cache Hygiene
 
@@ -298,9 +330,8 @@ Verification:
 
 The remaining work can be shipped in this order:
 
-1. Phase 5
-2. Phase 6
-3. Phase 7
+1. Phase 6
+2. Phase 7
 
 That order keeps the fast-path switch work ahead of the more subtle live
 reconciliation and cache-hygiene work.

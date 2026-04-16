@@ -3,15 +3,20 @@ mod json;
 mod table;
 
 use std::io::{self, Write};
+use std::sync::mpsc;
+use std::thread;
 
 use error_stack::{Report, ResultExt};
 use tracing::info_span;
 
-use crate::application::{SwitchWindow, complete_switch, list_windows, prepare_switch};
+use crate::application::{
+    SwitchWindow, complete_switch, list_windows, prepare_switch, reconcile_switch_inventory,
+};
+use crate::domain::WindowInventory;
 use crate::error::AppError;
 use crate::ghostty::GhosttyClient;
 use crate::state::StateStore;
-use crate::tui::{self, PickerEntry, PickerOutcome};
+use crate::tui::{self, PickerEntry, PickerOutcome, PickerRefresh, RefreshMessage};
 
 pub use args::Cli;
 use args::Command;
@@ -67,6 +72,7 @@ fn run_switch(
         let _run_enter = run_span.enter();
         prepare_switch(ghostty, state_store)?
     };
+    let initial_projects = context.state.projects.clone();
     let entries = {
         let _command_enter = command_span.enter();
         let _run_enter = run_span.enter();
@@ -78,8 +84,46 @@ fn run_switch(
             .map(picker_entry_from_window)
             .collect()
     };
+    let mut latest_live_inventory: Option<WindowInventory> = None;
+    let mut refresh_dirty = false;
+    let refresh_receiver = if context.seeded_from_live {
+        None
+    } else {
+        let (sender, receiver) = mpsc::channel();
+        let refresh_ghostty = ghostty.clone();
+        thread::spawn(move || {
+            let message = match refresh_ghostty.query_windows() {
+                Ok(inventory) => RefreshMessage::Success(inventory),
+                Err(error) => RefreshMessage::Failure(format!("{error:?}")),
+            };
+            let _ = sender.send(message);
+        });
+        Some(receiver)
+    };
 
-    match tui::run_picker(entries, &context.state.projects, command_span, &run_span)? {
+    match tui::run_picker(
+        entries,
+        &initial_projects,
+        refresh_receiver,
+        |inventory| {
+            let refresh =
+                reconcile_switch_inventory(&mut context.state, &inventory, jiff::Timestamp::now())?;
+            context.windows = refresh.windows.clone();
+            latest_live_inventory = Some(inventory);
+            refresh_dirty |= refresh.changed;
+
+            Ok(PickerRefresh {
+                entries: context
+                    .windows
+                    .iter()
+                    .map(picker_entry_from_window)
+                    .collect(),
+                projects: context.state.projects.clone(),
+            })
+        },
+        command_span,
+        &run_span,
+    )? {
         PickerOutcome::Confirm(entry) => {
             let selection = {
                 let _command_enter = command_span.enter();
@@ -102,13 +146,25 @@ fn run_switch(
 
             let _command_enter = command_span.enter();
             let _run_enter = run_span.enter();
-            complete_switch(ghostty, state_store, &mut context.state, &selection)
+            complete_switch(
+                ghostty,
+                state_store,
+                &mut context.state,
+                &selection,
+                latest_live_inventory.as_ref(),
+                refresh_dirty,
+            )
         }
         PickerOutcome::Cancel => {
             let _command_enter = command_span.enter();
             let _run_enter = run_span.enter();
             let cancel_span = info_span!("cli.switch_cancelled");
             let _cancel_enter = cancel_span.enter();
+            if refresh_dirty {
+                state_store.save(&context.state).attach(
+                    "Failed to persist Ghostty session state after live refresh during switch",
+                )?;
+            }
             Ok(())
         }
     }
