@@ -24,6 +24,11 @@ The following pieces are already implemented:
   - optional `last_window_name`
 - Joining live inventory with persisted state for display and switching.
 - Refreshing cached project records from live Ghostty inventory during `ls`.
+- Cached-first `switch` startup from persisted project state.
+- One-time live seeding when `switch` runs with an empty state file.
+- Cached picker rows built from persisted project records.
+- MRU ordering for cached switch rows using `last_accessed_at`.
+- Deterministic tie-breaking for equal MRU timestamps by canonical project key.
 - Basic `ratatui` switcher with:
   - browse-only list
   - selection movement
@@ -35,8 +40,6 @@ The following pieces are already implemented:
 
 The following pieces are not implemented yet:
 
-- Cached-first `switch` startup. `switch` still blocks on `query_windows`
-  before opening the picker.
 - Typed search or ranking inside the switcher.
 - `frizbee` integration or a dedicated `search.rs` module.
 - One-shot background live reconciliation while the picker is open.
@@ -55,15 +58,16 @@ Today the command behavior is:
   - merges live and persisted data in memory
   - renders either table or JSON output
 - `switch`
-  - queries Ghostty live before showing the UI
   - loads persisted state
-  - opens a browse-only picker from the live window list
+  - if cached projects exist, opens a browse-only picker from cached project rows immediately
+  - if the state file is empty, performs a one-time live Ghostty query to seed state
+  - orders cached rows by MRU with deterministic tie-breaking
   - focuses the selected window
   - records `last_accessed_at` and cached window hints for the selected project
 
-That means the current implementation is still on the old query-first switch
-path. The next plan should move from that baseline toward the newer stale-first
-switch design.
+That means `switch` now uses a stale-first cached path. Live reconciliation
+while the picker is open and fallback from stale cached window ids are still
+deferred to later phases.
 
 ## Completed Work
 
@@ -99,27 +103,40 @@ Verification already in code:
   fallback.
 - `ls --json` exposes the richer persisted state fields.
 
-## Remaining Work
-
 ### Phase 2: Make `switch` Cached-First
 
-Change switch startup so the picker can appear before a live Ghostty query
-completes.
+Phase 2 is now implemented.
 
-- Build picker rows from persisted project state when possible.
-- Keep a reasonable bootstrap behavior for first use when the state file is
-  empty. The simplest acceptable path is a one-time live seed.
-- Preserve the current basic picker behavior: browse, confirm, cancel.
-- Keep focus behavior unchanged on the happy path.
+- `prepare_switch` now loads persisted state before querying Ghostty.
+- When cached projects already exist, `prepare_switch` builds `SwitchContext`
+  directly from persisted project records.
+- When the state file is empty, `prepare_switch` performs a one-time live seed
+  via `query_windows` plus `refresh_from_inventory`.
+- Cached switch rows use:
+  - persisted `last_window_id`
+  - optional persisted `last_window_name`
+  - the persisted canonical project key as the project path
+- Cached row titles use the final path segment when available, with full-path
+  fallback.
+- Cached row details omit the window-name segment when it is absent.
+- Cached rows are ordered by:
+  - `last_accessed_at` descending
+  - canonical project key ascending for deterministic tie-breaking
+- `complete_switch` behavior is unchanged and still treats cached window ids as
+  hints rather than authoritative truth.
 
-Verification:
+Verification already in code:
 
-- State-oriented tests cover building switch rows from cached state without
-  live Ghostty input.
-- Manual smoke test: with populated state, `switch` opens immediately from
-  cached data.
-- Manual smoke test: first-use behavior still works when no cached projects
-  exist.
+- Application tests cover building switch rows from cached state without live
+  Ghostty input.
+- Application tests cover MRU ordering and deterministic tie-breaking.
+- Application tests cover cached title/detail rendering.
+- Application tests cover populated-state startup without a live query.
+- Application tests cover empty-state live seeding.
+- Application tests cover the empty-live-seed no-windows error path.
+- Manual Ghostty smoke tests have not yet been recorded in this plan.
+
+## Remaining Work
 
 ### Phase 3: Add Search And Ranking
 
@@ -216,12 +233,11 @@ Verification:
 
 The remaining work can be shipped in this order:
 
-1. Phase 2
-2. Phase 3
-3. Phase 4
-4. Phase 5
-5. Phase 6
-6. Phase 7
+1. Phase 3
+2. Phase 4
+3. Phase 5
+4. Phase 6
+5. Phase 7
 
 That order keeps the fast-path switch work ahead of the more subtle live
 reconciliation and cache-hygiene work.
