@@ -4,8 +4,7 @@
 
 `ghostty-session-manager` is a Rust CLI for treating Ghostty windows as
 project-scoped sessions. It uses Ghostty's AppleScript API as the control plane
-for reading window state and performing actions such as focusing windows and
-creating new ones.
+for reading window state and performing actions such as focusing windows.
 
 The implementation should be based on Ghostty's actual scripting dictionary,
 not an assumed AppleScript surface. A checked-in snapshot of the dictionary
@@ -94,6 +93,12 @@ Interactive switching will use:
 This avoids shelling out to `fzf` and keeps control of scoring and display
 inside the application.
 
+The `switch` flow should be built in phases:
+
+- phase 2: basic browse-and-select TUI shell
+- phase 3: standalone search and ranking logic in Rust
+- phase 4: query-driven filtering and ranking inside the TUI
+
 ## Platform Constraints
 
 - macOS only
@@ -105,10 +110,6 @@ Ghostty AppleScript capabilities relevant to this project include:
 - reading windows, tabs, terminals, and terminal working directories
 - reading `selected tab`, `focused terminal`, and tab `index`
 - activating windows
-- selecting tabs
-- focusing terminals
-- creating `surface configuration` records
-- creating windows and tabs with an initial working directory
 
 The current dictionary is shipped inside the app bundle at:
 
@@ -125,8 +126,8 @@ Important observations from the real dictionary:
 - `window.id`, `tab.id`, and `terminal.id` are `text`, not integers
 - `tab.index` is the only integer-like stable ordering field exposed for tabs
 - working directory is exposed on `terminal`, not `window` or `tab`
-- the action verbs are concrete AppleScript commands such as `activate window`,
-  `select tab`, `focus`, `new window`, and `new tab`
+- the action verbs are concrete AppleScript commands such as `activate window`
+  and `focus`
 
 ## Terminology
 
@@ -144,8 +145,6 @@ Planned early commands:
 
 - `ls`: list Ghostty windows and derived project paths
 - `switch`: open interactive picker and focus the selected project window
-- `open <path>`: focus matching window or create a new window at the path
-- `tab [path]`: create a tab in the matching or current project window
 
 The first implementation target is `ls`.
 
@@ -236,9 +235,6 @@ The first concrete Ghostty API should be minimal:
 The currently implemented `query_windows` boundary is based on the real
 dictionary and returns string IDs for windows, tabs, and terminals.
 
-Additional operations such as window creation or tab creation can be added when
-the command implementations actually require them.
-
 If the AppleScript boundary becomes harder to test, a second backend appears,
 or the application layer starts depending on integration details, that is the
 time to extract a formal port trait.
@@ -323,8 +319,7 @@ The Ghostty integration layer should prefer one script per logical action.
 Examples:
 
 - one script for `query_windows`
-- one script to focus a window or terminal
-- one script to create a new window with an initial working directory
+- one script to focus a window
 
 AppleScript output should be machine-oriented, not presentation-oriented.
 
@@ -360,7 +355,7 @@ background.
 
 ### Command Boundary Refresh
 
-At the start of each command such as `ls`, `switch`, `open`, or `tab`:
+At the start of each command such as `ls` or `switch`:
 
 1. query Ghostty for the current live snapshot
 2. load local JSON metadata
@@ -376,16 +371,17 @@ tool between invocations.
 For the `switch` TUI:
 
 - fetch one Ghostty snapshot when the UI starts
-- search and rank locally in memory while the UI is open
+- keep selection state local in memory while the UI is open
+- add filtering and ranking locally in memory once search is introduced
 - optionally support manual refresh later
 - avoid background polling in the first version
 
 ### Optimistic Updates
 
-After app-initiated actions such as focusing a window or creating a new one,
-the application may update in-memory state optimistically for the remainder of
-the current command. Persisted metadata should still be limited to supplemental
-state, not treated as a complete live runtime snapshot.
+After app-initiated actions such as focusing a window, the application may
+update in-memory state optimistically for the remainder of the current command.
+Persisted metadata should still be limited to supplemental state, not treated
+as a complete live runtime snapshot.
 
 ## Ranking Strategy
 
@@ -430,19 +426,14 @@ Responsibilities:
 
 - load Ghostty windows
 - load persistent state
-- rank entries
-- run interactive search
+- render an interactive picker
 - focus the selected window
 - update MRU state
 
-### `open <path>`
+Staged delivery:
 
-Responsibilities:
-
-- normalize input path
-- find matching project window if it exists
-- otherwise create a new Ghostty window with that working directory
-- persist project metadata
+- initial TUI shell supports browse, selection movement, confirm, and cancel
+- search and ranking are implemented separately, then integrated into the TUI
 
 ## Error Handling
 
@@ -486,6 +477,7 @@ find and inspect.
 1. Implement `ls` using a single AppleScript query and simple stdout output.
 2. Add Rust domain types and parsing for Ghostty query results.
 3. Add JSON state loading and saving.
-4. Build the interactive `switch` TUI with `ratatui` and `frizbee`.
-5. Add `open` and `tab` commands.
-6. Refine heuristics around project identity and window reuse.
+4. Build a basic interactive `switch` TUI shell with `ratatui`.
+5. Add standalone search and ranking logic with `frizbee`.
+6. Plug search into the `switch` TUI.
+7. Refine heuristics around project identity and window reuse.

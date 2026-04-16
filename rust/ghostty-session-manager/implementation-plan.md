@@ -45,22 +45,23 @@ Verification:
 - Manual smoke test: the JSON file is created, readable, and updates after a
   command that touches project state.
 
-## Phase 2: Implement `open <path>`
+## Phase 2: Add A Basic `switch` TUI
 
-Add the first stateful workflow: focus an existing project window or create a
-new one.
+Introduce an interactive picker before adding query-driven search.
 
-- Canonicalize the requested path before matching.
-- Add the minimal AppleScript actions needed for `focus_window` and `new_window`.
-- Reuse an existing matching window when possible and only create a new window
-  when no match exists.
+- Add a `ratatui`-based selection UI for project switching.
+- Show enough context to disambiguate similar project names.
+- Support browse, selection movement, confirm, and cancel without typed
+  filtering yet.
+- On selection, focus the chosen window and update MRU state.
 
 Verification:
 
-- Unit tests cover path canonicalization and the decision to focus vs create.
-- AppleScript command construction is covered by focused tests where practical.
-- Manual smoke test: running `open <path>` twice focuses the same window on the
-  second run instead of creating a duplicate.
+- Reducer- or state-oriented tests cover selection movement, confirm, and
+  cancel behavior.
+- Manual smoke test: open the picker, move through the list, hit enter, and
+  verify the intended Ghostty window is focused.
+- Manual smoke test: escape or cancel leaves Ghostty unchanged.
 
 ## Phase 3: Build Search And Ranking
 
@@ -78,39 +79,24 @@ Verification:
 - A small fixture-driven test verifies ranking against a realistic set of
   project paths.
 
-## Phase 4: Add Interactive `switch`
+## Phase 4: Plug Search Into `switch`
 
-Wrap the ranking engine in a terminal picker.
+Wire the ranking engine into the terminal picker.
 
-- Add `ratatui`-based selection UI for project switching.
-- Show enough context to disambiguate similar project names.
-- On selection, focus the chosen window and update MRU state.
+- Add query input and filtered result updates inside the existing TUI.
+- Keep search integration local to the TUI while preserving the standalone
+  search module for testing.
+- Continue updating MRU state when a selection is confirmed.
 
 Verification:
 
-- Reducer- or state-oriented tests cover selection movement, filtering, and
-  cancel behavior.
+- Reducer- or state-oriented tests cover query updates, filtering, selection
+  movement across filtered results, and cancel behavior.
 - Manual smoke test: open the picker, type a query, hit enter, and verify the
   intended Ghostty window is focused.
 - Manual smoke test: escape or cancel leaves Ghostty unchanged.
 
-## Phase 5: Add `tab [path]`
-
-Support expanding a project window without creating a new project session.
-
-- Add the AppleScript action for creating a tab with an initial working
-  directory.
-- Resolve the target window by explicit path first; later fallback behavior can
-  stay simple.
-- Keep the first version focused on creating tabs, not on complex tab targeting.
-
-Verification:
-
-- Unit tests cover target-window resolution and command argument handling.
-- Manual smoke test: `tab /path/to/project` adds a tab in the matching project
-  window with the expected initial working directory.
-
-## Phase 6: Improve Project Identity Robustness
+## Phase 5: Improve Project Identity Robustness
 
 Make matching resilient once real usage starts exposing edge cases.
 
@@ -123,10 +109,10 @@ Verification:
 
 - Unit tests cover identity reconciliation and path normalization rules.
 - Manual smoke test: after a terminal changes directories away from the project
-  root, `open <project>` still finds the expected window once the project has
-  been learned.
+  root, `switch` still surfaces the expected window once the project has been
+  learned.
 
-## Phase 7: Polish Errors, Diagnostics, And Docs
+## Phase 6: Polish Errors, Diagnostics, And Docs
 
 Make the tool easier to trust and debug in daily use.
 
@@ -140,8 +126,8 @@ Verification:
 - CLI tests or snapshot-style assertions cover key error messages.
 - Manual smoke tests cover at least one failure path and one successful path for
   each supported command.
-- A new user can follow the docs to get `ls`, `open`, and `switch` working on a
-  fresh machine.
+- A new user can follow the docs to get `ls` and `switch` working on a fresh
+  machine.
 
 ## Suggested Delivery Order
 
@@ -154,11 +140,10 @@ If the project needs especially small PRs, phases can be split this way:
 5. Phase 4
 6. Phase 5
 7. Phase 6
-8. Phase 7
 
 That order keeps the risky Ghostty automation work early, the search logic pure
-and testable, and the TUI late enough that the underlying workflows already
-exist.
+and testable, introduces a usable picker before fuzzy matching, and only wires
+search into the TUI after the ranking behavior is already proven in isolation.
 
 ## Out Of Scope For This Plan
 
