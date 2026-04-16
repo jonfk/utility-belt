@@ -61,6 +61,19 @@ Design consequence:
 - aliases are deferred until a real need appears
 - matching behavior should stay simple and predictable early on
 
+### Source Of Truth
+
+Ghostty is the source of truth for live runtime state.
+
+The local JSON state file is supplemental metadata only.
+
+Design consequence:
+
+- windows, tabs, terminals, and focus are always discovered from Ghostty
+- local state stores only durable metadata such as MRU history
+- the application should not attempt to maintain an authoritative mirror of the
+  full Ghostty runtime graph
+
 ### Interactive UI
 
 Interactive switching will use:
@@ -212,6 +225,8 @@ GhosttyTerminal
 - `project_path` is the stable key
 - `last_window_id` is a hint, not a trusted permanent identifier
 - timestamps should be stored in UTC
+- persisted state should avoid storing full live window or tab inventories as
+  authoritative data
 
 ## AppleScript Strategy
 
@@ -232,6 +247,44 @@ Preferred formats:
 
 TSV is likely the simplest starting point because it is easy to generate from
 AppleScript and easy to parse in Rust.
+
+## Sync Strategy
+
+The first version should use on-demand refresh, not continuous synchronization.
+
+Ghostty does not currently provide a clean event subscription model for window,
+tab, terminal, or focus changes through the chosen integration path, so the
+application should avoid trying to track live changes incrementally in the
+background.
+
+### Command Boundary Refresh
+
+At the start of each command such as `ls`, `switch`, `open`, or `tab`:
+
+1. query Ghostty for the current live snapshot
+2. load local JSON metadata
+3. merge live state with local metadata in memory
+4. perform the requested action
+5. persist any metadata updates after a successful action
+
+This keeps the model simple and correct even if Ghostty was changed outside the
+tool between invocations.
+
+### Interactive Switcher Refresh
+
+For the `switch` TUI:
+
+- fetch one Ghostty snapshot when the UI starts
+- search and rank locally in memory while the UI is open
+- optionally support manual refresh later
+- avoid background polling in the first version
+
+### Optimistic Updates
+
+After app-initiated actions such as focusing a window or creating a new one,
+the application may update in-memory state optimistically for the remainder of
+the current command. Persisted metadata should still be limited to supplemental
+state, not treated as a complete live runtime snapshot.
 
 ## Ranking Strategy
 
