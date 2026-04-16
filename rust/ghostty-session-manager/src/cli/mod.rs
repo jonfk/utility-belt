@@ -103,7 +103,7 @@ fn run_switch(
 
     match tui::run_picker(
         entries,
-        &initial_projects,
+        initial_projects,
         refresh_receiver,
         |inventory| {
             let refresh =

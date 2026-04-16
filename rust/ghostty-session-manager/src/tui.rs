@@ -52,6 +52,7 @@ pub struct PickerRefresh {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickerState {
+    projects: BTreeMap<String, ProjectStateRecord>,
     entries_by_project_key: BTreeMap<String, PickerEntry>,
     filtered_project_keys: Vec<String>,
     selected_project_key: Option<String>,
@@ -59,18 +60,19 @@ pub struct PickerState {
 }
 
 impl PickerState {
-    pub fn new(entries: Vec<PickerEntry>, projects: &BTreeMap<String, ProjectStateRecord>) -> Self {
+    pub fn new(entries: Vec<PickerEntry>, projects: BTreeMap<String, ProjectStateRecord>) -> Self {
         let entries_by_project_key = entries
             .into_iter()
             .map(|entry| (entry.project_key.clone(), entry))
             .collect::<BTreeMap<_, _>>();
         let mut state = Self {
+            projects,
             entries_by_project_key,
             filtered_project_keys: Vec::new(),
             selected_project_key: None,
             query: String::new(),
         };
-        state.refresh_filtered_projects(projects);
+        state.refresh_filtered_projects();
         state
     }
 
@@ -125,31 +127,28 @@ impl PickerState {
         PickerOutcome::Cancel
     }
 
-    pub fn append_query_char(
-        &mut self,
-        character: char,
-        projects: &BTreeMap<String, ProjectStateRecord>,
-    ) {
+    pub fn append_query_char(&mut self, character: char) {
         self.query.push(character);
-        self.refresh_filtered_projects(projects);
+        self.refresh_filtered_projects();
     }
 
-    pub fn pop_query_char(&mut self, projects: &BTreeMap<String, ProjectStateRecord>) {
+    pub fn pop_query_char(&mut self) {
         if self.query.pop().is_some() {
-            self.refresh_filtered_projects(projects);
+            self.refresh_filtered_projects();
         }
     }
 
     pub fn apply_refresh(
         &mut self,
         entries: Vec<PickerEntry>,
-        projects: &BTreeMap<String, ProjectStateRecord>,
+        projects: BTreeMap<String, ProjectStateRecord>,
     ) {
+        self.projects = projects;
         self.entries_by_project_key = entries
             .into_iter()
             .map(|entry| (entry.project_key.clone(), entry))
             .collect();
-        self.refresh_filtered_projects(projects);
+        self.refresh_filtered_projects();
     }
 
     fn selected_entry(&self) -> Option<&PickerEntry> {
@@ -157,9 +156,9 @@ impl PickerState {
         self.entries_by_project_key.get(selected_project_key)
     }
 
-    fn refresh_filtered_projects(&mut self, projects: &BTreeMap<String, ProjectStateRecord>) {
+    fn refresh_filtered_projects(&mut self) {
         let previous_selection = self.selected_project_key.clone();
-        self.filtered_project_keys = rank_project_keys(&self.query, projects)
+        self.filtered_project_keys = rank_project_keys(&self.query, &self.projects)
             .into_iter()
             .filter(|project_key| self.entries_by_project_key.contains_key(project_key))
             .collect();
@@ -180,7 +179,7 @@ impl PickerState {
 
 pub fn run_picker(
     entries: Vec<PickerEntry>,
-    projects: &BTreeMap<String, ProjectStateRecord>,
+    projects: BTreeMap<String, ProjectStateRecord>,
     mut refresh_receiver: Option<Receiver<RefreshMessage>>,
     mut apply_refresh: impl FnMut(
         crate::domain::WindowInventory,
@@ -221,7 +220,7 @@ pub fn run_picker(
             match receiver.try_recv() {
                 Ok(RefreshMessage::Success(inventory)) => {
                     let refresh = apply_refresh(inventory)?;
-                    state.apply_refresh(refresh.entries, &refresh.projects);
+                    state.apply_refresh(refresh.entries, refresh.projects);
                     refresh_receiver = None;
                 }
                 Ok(RefreshMessage::Failure(_error)) => {
@@ -258,7 +257,7 @@ pub fn run_picker(
             let _run_enter = run_span.enter();
             let handle_span = info_span!("tui.handle_key_event", key = ?key_event.code);
             let _handle_enter = handle_span.enter();
-            handle_key_event(key_event, &mut state, projects)
+            handle_key_event(key_event, &mut state)
         } {
             return Ok(outcome);
         }
@@ -296,11 +295,7 @@ fn poll_key_event(timeout: Duration) -> Result<Option<KeyEvent>, Report<AppError
     Ok(None)
 }
 
-fn handle_key_event(
-    key_event: KeyEvent,
-    state: &mut PickerState,
-    projects: &BTreeMap<String, ProjectStateRecord>,
-) -> Option<PickerOutcome> {
+fn handle_key_event(key_event: KeyEvent, state: &mut PickerState) -> Option<PickerOutcome> {
     match key_event.code {
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
@@ -311,13 +306,13 @@ fn handle_key_event(
             None
         }
         KeyCode::Backspace => {
-            state.pop_query_char(projects);
+            state.pop_query_char();
             None
         }
         KeyCode::Enter => Some(state.confirm()),
         KeyCode::Esc | KeyCode::Char('q') => Some(state.cancel()),
         KeyCode::Char(character) if is_printable_query_char(character, key_event.modifiers) => {
-            state.append_query_char(character, projects);
+            state.append_query_char(character);
             None
         }
         _ => None,
@@ -340,7 +335,7 @@ fn render_picker(frame: &mut Frame, state: &PickerState) {
     frame.render_widget(instructions, instructions_area);
 
     let query = if state.query().is_empty() {
-        "Type to filter cached projects".to_owned()
+        "Type to filter projects".to_owned()
     } else {
         state.query().to_owned()
     };
@@ -353,7 +348,7 @@ fn render_picker(frame: &mut Frame, state: &PickerState) {
 
     let filtered_entries = state.filtered_entries();
     if filtered_entries.is_empty() {
-        let empty_state = Paragraph::new("No cached projects match the current query")
+        let empty_state = Paragraph::new("No projects match the current query")
             .block(Block::default().borders(Borders::ALL).title("Windows"));
         frame.render_widget(empty_state, list_area);
         return;
@@ -400,14 +395,14 @@ mod tests {
 
     #[test]
     fn first_row_is_selected_initially() {
-        let state = PickerState::new(sample_entries(), &sample_projects());
+        let state = PickerState::new(sample_entries(), sample_projects());
 
         assert_eq!(state.selected_index(), Some(0));
     }
 
     #[test]
     fn moving_up_at_start_stays_on_first_row() {
-        let mut state = PickerState::new(sample_entries(), &sample_projects());
+        let mut state = PickerState::new(sample_entries(), sample_projects());
 
         state.move_up();
 
@@ -416,7 +411,7 @@ mod tests {
 
     #[test]
     fn moving_down_at_end_stays_on_last_row() {
-        let mut state = PickerState::new(sample_entries(), &sample_projects());
+        let mut state = PickerState::new(sample_entries(), sample_projects());
         state.move_down();
         state.move_down();
         state.move_down();
@@ -426,7 +421,7 @@ mod tests {
 
     #[test]
     fn confirm_returns_selected_row() {
-        let mut state = PickerState::new(sample_entries(), &sample_projects());
+        let mut state = PickerState::new(sample_entries(), sample_projects());
         state.move_down();
         state.move_down();
 
@@ -443,14 +438,14 @@ mod tests {
 
     #[test]
     fn cancel_returns_cancel_outcome() {
-        let state = PickerState::new(sample_entries(), &sample_projects());
+        let state = PickerState::new(sample_entries(), sample_projects());
 
         assert_eq!(state.cancel(), PickerOutcome::Cancel);
     }
 
     #[test]
     fn empty_query_uses_mru_ordering() {
-        let state = PickerState::new(sample_entries(), &sample_projects());
+        let state = PickerState::new(sample_entries(), sample_projects());
 
         assert_eq!(
             state
@@ -464,10 +459,9 @@ mod tests {
 
     #[test]
     fn typing_query_updates_filtered_entries() {
-        let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), sample_projects());
 
-        state.append_query_char('b', &projects);
+        state.append_query_char('b');
 
         assert_eq!(state.query(), "b");
         assert_eq!(
@@ -482,19 +476,18 @@ mod tests {
 
     #[test]
     fn backspace_widens_filtered_entries() {
-        let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
-        state.append_query_char('p', &projects);
-        state.append_query_char('r', &projects);
-        state.append_query_char('o', &projects);
-        state.append_query_char('j', &projects);
-        state.append_query_char('e', &projects);
-        state.append_query_char('c', &projects);
-        state.append_query_char('t', &projects);
-        state.append_query_char('-', &projects);
-        state.append_query_char('b', &projects);
+        let mut state = PickerState::new(sample_entries(), sample_projects());
+        state.append_query_char('p');
+        state.append_query_char('r');
+        state.append_query_char('o');
+        state.append_query_char('j');
+        state.append_query_char('e');
+        state.append_query_char('c');
+        state.append_query_char('t');
+        state.append_query_char('-');
+        state.append_query_char('b');
 
-        state.pop_query_char(&projects);
+        state.pop_query_char();
 
         assert_eq!(state.query(), "project-");
         assert_eq!(state.filtered_entries().len(), 3);
@@ -502,11 +495,10 @@ mod tests {
 
     #[test]
     fn selection_is_preserved_by_project_key_when_still_visible() {
-        let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), sample_projects());
         state.move_down();
 
-        state.append_query_char('a', &projects);
+        state.append_query_char('a');
 
         assert_eq!(
             state.confirm(),
@@ -521,12 +513,11 @@ mod tests {
 
     #[test]
     fn selection_falls_back_to_first_filtered_result_when_previous_selection_disappears() {
-        let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), sample_projects());
         state.move_down();
 
         for character in "project-c".chars() {
-            state.append_query_char(character, &projects);
+            state.append_query_char(character);
         }
 
         assert_eq!(
@@ -542,12 +533,11 @@ mod tests {
 
     #[test]
     fn confirm_returns_cancel_when_query_has_no_results() {
-        let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), sample_projects());
 
-        state.append_query_char('z', &projects);
-        state.append_query_char('z', &projects);
-        state.append_query_char('z', &projects);
+        state.append_query_char('z');
+        state.append_query_char('z');
+        state.append_query_char('z');
 
         assert_eq!(state.selected_index(), None);
         assert_eq!(state.confirm(), PickerOutcome::Cancel);
@@ -555,15 +545,14 @@ mod tests {
 
     #[test]
     fn handle_key_event_appends_and_deletes_query_text() {
-        let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), sample_projects());
 
         assert_eq!(
-            handle_key_event(key_event(KeyCode::Char('b')), &mut state, &projects),
+            handle_key_event(key_event(KeyCode::Char('b')), &mut state),
             None
         );
         assert_eq!(
-            handle_key_event(key_event(KeyCode::Backspace), &mut state, &projects),
+            handle_key_event(key_event(KeyCode::Backspace), &mut state),
             None
         );
 
@@ -573,12 +562,12 @@ mod tests {
     #[test]
     fn apply_refresh_preserves_query() {
         let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), projects.clone());
         for character in "project-c".chars() {
-            state.append_query_char(character, &projects);
+            state.append_query_char(character);
         }
 
-        state.apply_refresh(sample_entries(), &projects);
+        state.apply_refresh(sample_entries(), projects);
 
         assert_eq!(state.query(), "project-c");
         assert_eq!(
@@ -594,10 +583,10 @@ mod tests {
     #[test]
     fn apply_refresh_preserves_selection_when_selected_project_still_exists() {
         let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), projects.clone());
         state.move_down();
 
-        state.apply_refresh(sample_entries(), &projects);
+        state.apply_refresh(sample_entries(), projects);
 
         assert_eq!(
             state.confirm(),
@@ -613,7 +602,7 @@ mod tests {
     #[test]
     fn apply_refresh_falls_back_to_first_filtered_result_when_selected_project_disappears() {
         let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), projects.clone());
         state.move_down();
 
         state.apply_refresh(
@@ -631,7 +620,7 @@ mod tests {
                     detail: "/tmp/project-c | window-3".to_owned(),
                 },
             ],
-            &projects,
+            projects,
         );
 
         assert_eq!(
@@ -648,7 +637,7 @@ mod tests {
     #[test]
     fn apply_refresh_can_add_new_projects_without_breaking_filtered_ordering() {
         let mut projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
+        let mut state = PickerState::new(sample_entries(), projects.clone());
 
         projects.insert(
             "/tmp/project-d".to_owned(),
@@ -681,7 +670,7 @@ mod tests {
                     detail: "/tmp/project-d | window-4".to_owned(),
                 },
             ],
-            &projects,
+            projects,
         );
 
         assert_eq!(
@@ -702,13 +691,66 @@ mod tests {
     #[test]
     fn apply_refresh_keeps_empty_state_behavior() {
         let projects = sample_projects();
-        let mut state = PickerState::new(sample_entries(), &projects);
-        state.append_query_char('z', &projects);
+        let mut state = PickerState::new(sample_entries(), projects.clone());
+        state.append_query_char('z');
 
-        state.apply_refresh(sample_entries(), &projects);
+        state.apply_refresh(sample_entries(), projects);
 
         assert_eq!(state.selected_index(), None);
         assert_eq!(state.confirm(), PickerOutcome::Cancel);
+    }
+
+    #[test]
+    fn apply_refresh_searches_against_new_projects() {
+        let mut projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), projects.clone());
+
+        projects.insert(
+            "/tmp/project-d".to_owned(),
+            project_record("2026-04-16T12:00:00Z"),
+        );
+        state.apply_refresh(refreshed_entries(), projects);
+
+        state.append_query_char('d');
+
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(PickerEntry {
+                project_key: "/tmp/project-d".to_owned(),
+                window_id: "window-4".to_owned(),
+                title: "project-d".to_owned(),
+                detail: "/tmp/project-d | window-4".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn apply_refresh_keeps_new_projects_visible_after_clearing_query() {
+        let mut projects = sample_projects();
+        let mut state = PickerState::new(sample_entries(), projects.clone());
+
+        projects.insert(
+            "/tmp/project-d".to_owned(),
+            project_record("2026-04-16T12:00:00Z"),
+        );
+        state.apply_refresh(refreshed_entries(), projects);
+
+        state.append_query_char('d');
+        state.pop_query_char();
+
+        assert_eq!(
+            state
+                .filtered_entries()
+                .into_iter()
+                .map(|entry| entry.project_key.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "/tmp/project-d",
+                "/tmp/project-c",
+                "/tmp/project-a",
+                "/tmp/project-b",
+            ]
+        );
     }
 
     fn sample_entries() -> Vec<PickerEntry> {
@@ -730,6 +772,35 @@ mod tests {
                 window_id: "window-3".to_owned(),
                 title: "project-c".to_owned(),
                 detail: "/tmp/project-c | window-3".to_owned(),
+            },
+        ]
+    }
+
+    fn refreshed_entries() -> Vec<PickerEntry> {
+        vec![
+            PickerEntry {
+                project_key: "/tmp/project-a".to_owned(),
+                window_id: "window-1".to_owned(),
+                title: "project-a".to_owned(),
+                detail: "/tmp/project-a | window-1".to_owned(),
+            },
+            PickerEntry {
+                project_key: "/tmp/project-b".to_owned(),
+                window_id: "window-2".to_owned(),
+                title: "project-b".to_owned(),
+                detail: "/tmp/project-b | window-2".to_owned(),
+            },
+            PickerEntry {
+                project_key: "/tmp/project-c".to_owned(),
+                window_id: "window-3".to_owned(),
+                title: "project-c".to_owned(),
+                detail: "/tmp/project-c | window-3".to_owned(),
+            },
+            PickerEntry {
+                project_key: "/tmp/project-d".to_owned(),
+                window_id: "window-4".to_owned(),
+                title: "project-d".to_owned(),
+                detail: "/tmp/project-d | window-4".to_owned(),
             },
         ]
     }
