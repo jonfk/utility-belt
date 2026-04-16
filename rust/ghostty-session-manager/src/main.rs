@@ -1,4 +1,4 @@
-mod app;
+mod application;
 mod cli;
 mod domain;
 mod error;
@@ -13,7 +13,7 @@ fn main() {
     let cli = Cli::parse();
     let verbose = cli.verbose;
 
-    if let Err(report) = app::run(cli) {
+    if let Err(report) = cli::run(cli) {
         if verbose {
             eprintln!("{report:?}");
         } else {

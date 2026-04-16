@@ -27,10 +27,6 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn tab_count(&self) -> usize {
-        self.tabs.len()
-    }
-
     fn derived_project_path(&self) -> Option<PathBuf> {
         self.tabs
             .iter()
