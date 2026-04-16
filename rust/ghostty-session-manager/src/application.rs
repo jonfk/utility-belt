@@ -40,22 +40,11 @@ pub fn prepare_switch(
 ) -> Result<SwitchContext, Report<AppError>> {
     let span = info_span!("application.prepare_switch");
     let _enter = span.enter();
-    let (inventory, state) = load_inventory_and_state(ghostty, state_store)?;
-    let listed = ListedWindows::from_live_and_state(&inventory, &state);
-
-    if listed.windows.is_empty() {
-        return Err(Report::new(AppError::Ghostty).attach(
-            "Ghostty returned no windows to switch to; open a Ghostty window and try again",
-        ));
-    }
-
-    Ok(SwitchContext {
-        windows: listed
-            .windows
-            .iter()
-            .map(SwitchWindow::from_listed_window)
-            .collect(),
-        state,
+    prepare_switch_with_inventory_loader(state_store, || {
+        ghostty
+            .query_windows()
+            .change_context(AppError::Ghostty)
+            .attach("Failed to query Ghostty windows")
     })
 }
 
@@ -100,19 +89,36 @@ pub struct SwitchWindow {
     pub detail: String,
 }
 
-impl SwitchWindow {
-    fn from_listed_window(window: &ListedWindow) -> Self {
-        let title = switch_title(window);
-        let detail = switch_detail(window);
+fn prepare_switch_with_inventory_loader<F>(
+    state_store: &StateStore,
+    load_inventory: F,
+) -> Result<SwitchContext, Report<AppError>>
+where
+    F: FnOnce() -> Result<WindowInventory, Report<AppError>>,
+{
+    let mut state = state_store
+        .load()
+        .attach("Failed to load persisted Ghostty session state")?;
 
-        Self {
-            window_id: window.window_id.clone(),
-            window_name: window.window_name.clone(),
-            project_path: window.project_path.clone(),
-            title,
-            detail,
+    if state.projects.is_empty() {
+        let inventory = load_inventory()?;
+        let observed_at = Timestamp::now();
+
+        if state.refresh_from_inventory(&inventory, observed_at)? {
+            state_store.save(&state).attach(
+                "Failed to persist refreshed Ghostty session state after seeding switch cache",
+            )?;
         }
     }
+
+    let windows = switch_windows_from_state(&state);
+    if windows.is_empty() {
+        return Err(Report::new(AppError::Ghostty).attach(
+            "Ghostty returned no windows to switch to; open a Ghostty window and try again",
+        ));
+    }
+
+    Ok(SwitchContext { windows, state })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -195,54 +201,63 @@ impl ListedTerminal {
     }
 }
 
-fn load_inventory_and_state(
-    ghostty: &GhosttyClient,
-    state_store: &StateStore,
-) -> Result<(WindowInventory, StateFile), Report<AppError>> {
-    let span = info_span!("application.load_inventory_and_state");
-    let _enter = span.enter();
-    let inventory = ghostty
-        .query_windows()
-        .change_context(AppError::Ghostty)
-        .attach("Failed to query Ghostty windows")?;
-    let state = state_store
-        .load()
-        .attach("Failed to load persisted Ghostty session state")?;
+fn switch_windows_from_state(state: &StateFile) -> Vec<SwitchWindow> {
+    let mut rows: Vec<(&str, &ProjectStateRecord)> = state
+        .projects
+        .iter()
+        .map(|(project_key, project_state)| (project_key.as_str(), project_state))
+        .collect();
 
-    Ok((inventory, state))
+    rows.sort_by(|(left_key, left_record), (right_key, right_record)| {
+        right_record
+            .last_accessed_at
+            .cmp(&left_record.last_accessed_at)
+            .then_with(|| left_key.cmp(right_key))
+    });
+
+    rows.into_iter()
+        .map(|(project_key, project_state)| {
+            switch_window_from_project_state(project_key, project_state)
+        })
+        .collect()
 }
 
-fn switch_title(window: &ListedWindow) -> String {
-    if let Some(project_path) = &window.project_path {
-        return project_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| project_path.display().to_string());
-    }
+fn switch_window_from_project_state(
+    project_key: &str,
+    project_state: &ProjectStateRecord,
+) -> SwitchWindow {
+    let project_path = PathBuf::from(project_key);
 
-    window
-        .window_name
-        .clone()
-        .unwrap_or_else(|| "No project path".to_owned())
-}
-
-fn switch_detail(window: &ListedWindow) -> String {
-    match (&window.project_path, &window.window_name) {
-        (Some(project_path), Some(window_name)) => format!(
-            "{} | {} | {}",
-            project_path.display(),
-            window_name,
-            window.window_id
+    SwitchWindow {
+        window_id: project_state.last_window_id.clone(),
+        window_name: project_state.last_window_name.clone(),
+        title: switch_title_from_project_path(&project_path),
+        detail: switch_detail_from_project_state(
+            project_key,
+            project_state.last_window_name.as_deref(),
+            &project_state.last_window_id,
         ),
-        (Some(project_path), None) => {
-            format!("{} | {}", project_path.display(), window.window_id)
-        }
-        (None, Some(window_name)) => {
-            format!("No project path | {} | {}", window_name, window.window_id)
-        }
-        (None, None) => format!("No project path | {}", window.window_id),
+        project_path: Some(project_path),
+    }
+}
+
+fn switch_title_from_project_path(project_path: &Path) -> String {
+    project_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| project_path.display().to_string())
+}
+
+fn switch_detail_from_project_state(
+    project_key: &str,
+    window_name: Option<&str>,
+    window_id: &str,
+) -> String {
+    match window_name {
+        Some(window_name) => format!("{project_key} | {window_name} | {window_id}"),
+        None => format!("{project_key} | {window_id}"),
     }
 }
 
@@ -282,9 +297,12 @@ mod tests {
 
     use jiff::Timestamp;
 
-    use super::{ListedWindows, SwitchWindow, record_switch_selection};
+    use super::{
+        ListedWindows, SwitchWindow, prepare_switch_with_inventory_loader, record_switch_selection,
+        switch_window_from_project_state, switch_windows_from_state,
+    };
     use crate::domain::{Tab, Terminal, Window, WindowInventory};
-    use crate::state::{ProjectStateRecord, StateFile};
+    use crate::state::{ProjectStateRecord, StateFile, StateStore};
 
     #[test]
     fn joins_matching_canonical_project_state() {
@@ -538,6 +556,222 @@ mod tests {
             joined_state.last_seen_at,
             parse_timestamp("2026-04-15T12:05:10Z")
         );
+    }
+
+    #[test]
+    fn builds_cached_switch_rows_without_live_inventory() {
+        let state = StateFile {
+            version: 1,
+            projects: BTreeMap::from([(
+                "/tmp/project-alpha".to_owned(),
+                ProjectStateRecord {
+                    last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                    last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                    last_window_id: "window-1".to_owned(),
+                    last_window_name: Some("Workspace".to_owned()),
+                },
+            )]),
+        };
+
+        let windows = switch_windows_from_state(&state);
+
+        assert_eq!(
+            windows,
+            vec![SwitchWindow {
+                window_id: "window-1".to_owned(),
+                window_name: Some("Workspace".to_owned()),
+                project_path: Some(PathBuf::from("/tmp/project-alpha")),
+                title: "project-alpha".to_owned(),
+                detail: "/tmp/project-alpha | Workspace | window-1".to_owned(),
+            }]
+        );
+    }
+
+    #[test]
+    fn cached_switch_rows_are_sorted_by_mru_descending() {
+        let state = StateFile {
+            version: 1,
+            projects: BTreeMap::from([
+                (
+                    "/tmp/project-a".to_owned(),
+                    ProjectStateRecord {
+                        last_accessed_at: parse_timestamp("2026-04-16T09:00:00Z"),
+                        last_seen_at: parse_timestamp("2026-04-16T09:05:00Z"),
+                        last_window_id: "window-a".to_owned(),
+                        last_window_name: Some("Workspace A".to_owned()),
+                    },
+                ),
+                (
+                    "/tmp/project-b".to_owned(),
+                    ProjectStateRecord {
+                        last_accessed_at: parse_timestamp("2026-04-16T11:00:00Z"),
+                        last_seen_at: parse_timestamp("2026-04-16T11:05:00Z"),
+                        last_window_id: "window-b".to_owned(),
+                        last_window_name: Some("Workspace B".to_owned()),
+                    },
+                ),
+            ]),
+        };
+
+        let windows = switch_windows_from_state(&state);
+
+        assert_eq!(
+            windows
+                .iter()
+                .map(|window| {
+                    window
+                        .project_path
+                        .as_ref()
+                        .expect("cached row path")
+                        .display()
+                        .to_string()
+                })
+                .collect::<Vec<_>>(),
+            vec!["/tmp/project-b".to_owned(), "/tmp/project-a".to_owned()]
+        );
+    }
+
+    #[test]
+    fn cached_switch_rows_tie_break_by_project_key() {
+        let accessed_at = parse_timestamp("2026-04-16T09:00:00Z");
+        let state = StateFile {
+            version: 1,
+            projects: BTreeMap::from([
+                (
+                    "/tmp/project-b".to_owned(),
+                    ProjectStateRecord {
+                        last_accessed_at: accessed_at,
+                        last_seen_at: accessed_at,
+                        last_window_id: "window-b".to_owned(),
+                        last_window_name: Some("Workspace B".to_owned()),
+                    },
+                ),
+                (
+                    "/tmp/project-a".to_owned(),
+                    ProjectStateRecord {
+                        last_accessed_at: accessed_at,
+                        last_seen_at: accessed_at,
+                        last_window_id: "window-a".to_owned(),
+                        last_window_name: Some("Workspace A".to_owned()),
+                    },
+                ),
+            ]),
+        };
+
+        let windows = switch_windows_from_state(&state);
+
+        assert_eq!(
+            windows
+                .iter()
+                .map(|window| {
+                    window
+                        .project_path
+                        .as_ref()
+                        .expect("cached row path")
+                        .display()
+                        .to_string()
+                })
+                .collect::<Vec<_>>(),
+            vec!["/tmp/project-a".to_owned(), "/tmp/project-b".to_owned()]
+        );
+    }
+
+    #[test]
+    fn cached_switch_row_omits_window_name_segment_when_missing() {
+        let window = switch_window_from_project_state(
+            "/tmp/project-alpha",
+            &ProjectStateRecord {
+                last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                last_window_id: "window-1".to_owned(),
+                last_window_name: None,
+            },
+        );
+
+        assert_eq!(window.title, "project-alpha");
+        assert_eq!(window.detail, "/tmp/project-alpha | window-1");
+    }
+
+    #[test]
+    fn prepare_switch_uses_cached_state_without_live_query() {
+        let temp_dir = unique_test_dir();
+        let state_path = temp_dir.join("state.json");
+        let store = StateStore::from_path(&state_path);
+        let state = StateFile {
+            version: 1,
+            projects: BTreeMap::from([(
+                "/tmp/project-alpha".to_owned(),
+                ProjectStateRecord {
+                    last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                    last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                    last_window_id: "window-1".to_owned(),
+                    last_window_name: Some("Workspace".to_owned()),
+                },
+            )]),
+        };
+        store.save(&state).expect("state should save");
+
+        let context = prepare_switch_with_inventory_loader(&store, || {
+            panic!("live Ghostty query should not run when cached state is populated")
+        })
+        .expect("cached switch context should build");
+
+        assert_eq!(context.state, state);
+        assert_eq!(context.windows, switch_windows_from_state(&context.state));
+    }
+
+    #[test]
+    fn prepare_switch_seeds_from_live_inventory_when_state_is_empty() {
+        let temp_dir = unique_test_dir();
+        let store = StateStore::from_path(temp_dir.join("state.json"));
+        let project_dir = temp_dir.join("project");
+        fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+        let inventory = WindowInventory::from_windows(vec![Window {
+            window_id: "window-1".to_owned(),
+            window_name: Some("Workspace".to_owned()),
+            project_path: Some(project_dir.clone()),
+            tabs: vec![Tab {
+                tab_id: "tab-1".to_owned(),
+                tab_name: Some("Editor".to_owned()),
+                index: 1,
+                terminals: vec![Terminal {
+                    terminal_id: "terminal-1".to_owned(),
+                    working_directory: Some(project_dir.clone()),
+                }],
+            }],
+        }]);
+
+        let context = prepare_switch_with_inventory_loader(&store, || Ok(inventory.clone()))
+            .expect("seeded switch context should build");
+        let persisted = store.load().expect("seeded state should load");
+
+        assert_eq!(context.state, persisted);
+        assert_eq!(context.windows, switch_windows_from_state(&context.state));
+        assert_eq!(context.windows.len(), 1);
+        assert_eq!(
+            context.windows[0].project_path.as_deref(),
+            Some(
+                project_dir
+                    .canonicalize()
+                    .expect("project dir should canonicalize")
+                    .as_path()
+            )
+        );
+    }
+
+    #[test]
+    fn prepare_switch_returns_no_windows_error_when_seeded_state_is_still_empty() {
+        let temp_dir = unique_test_dir();
+        let store = StateStore::from_path(temp_dir.join("state.json"));
+
+        let report = prepare_switch_with_inventory_loader(&store, || {
+            Ok(WindowInventory::from_windows(vec![]))
+        })
+        .expect_err("empty seed should fail");
+
+        let rendered = format!("{report:?}");
+        assert!(rendered.contains("Ghostty returned no windows to switch to"));
     }
 
     fn unique_test_dir() -> PathBuf {
