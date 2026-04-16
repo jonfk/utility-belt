@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::path::Path;
 
 use error_stack::{Report, ResultExt};
 
@@ -22,10 +23,7 @@ fn run_ls(ghostty: &GhosttyClient, json: bool) -> Result<(), Report<AppError>> {
         .attach("Failed to query Ghostty windows")?;
 
     if json {
-        let rendered = serde_json::to_string_pretty(&inventory)
-            .change_context(AppError::Output)
-            .attach("Failed to serialize Ghostty window inventory as JSON")?;
-
+        let rendered = render_inventory_json(&inventory)?;
         write_stdout(&rendered)?;
         return Ok(());
     }
@@ -40,6 +38,12 @@ fn write_stdout(rendered: &str) -> Result<(), Report<AppError>> {
         .change_context(AppError::Output)
         .attach("Failed to write command output to stdout")?;
     Ok(())
+}
+
+fn render_inventory_json(inventory: &WindowInventory) -> Result<String, Report<AppError>> {
+    serde_json::to_string_pretty(inventory)
+        .change_context(AppError::Output)
+        .attach("Failed to serialize Ghostty window inventory as JSON")
 }
 
 fn render_inventory_table(inventory: &WindowInventory) -> String {
@@ -94,7 +98,7 @@ fn display_optional_string(value: Option<&str>) -> String {
     value.unwrap_or("-").to_owned()
 }
 
-fn display_optional_path(value: Option<&std::path::Path>) -> String {
+fn display_optional_path(value: Option<&Path>) -> String {
     value
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "-".to_owned())
@@ -104,9 +108,11 @@ fn display_optional_path(value: Option<&std::path::Path>) -> String {
 mod tests {
     use std::path::PathBuf;
 
+    use serde_json::Value;
+
     use crate::domain::{Tab, Terminal, Window, WindowInventory};
 
-    use super::render_inventory_table;
+    use super::{render_inventory_json, render_inventory_table};
 
     #[test]
     fn renders_table_headers_and_values() {
@@ -152,5 +158,86 @@ mod tests {
 
         let rendered = render_inventory_table(&inventory);
         assert!(rendered.contains("-"));
+    }
+
+    #[test]
+    fn renders_table_in_window_insertion_order() {
+        let inventory = WindowInventory::from_windows(vec![
+            Window {
+                window_id: "window-2".to_owned(),
+                window_name: Some("Second".to_owned()),
+                project_path: None,
+                tabs: vec![Tab {
+                    tab_id: "tab-2".to_owned(),
+                    tab_name: Some("Shell".to_owned()),
+                    index: 1,
+                    terminals: vec![Terminal {
+                        terminal_id: "terminal-2".to_owned(),
+                        working_directory: Some(PathBuf::from("/Users/example/project-b")),
+                    }],
+                }],
+            },
+            Window {
+                window_id: "window-1".to_owned(),
+                window_name: Some("First".to_owned()),
+                project_path: None,
+                tabs: vec![Tab {
+                    tab_id: "tab-1".to_owned(),
+                    tab_name: Some("Editor".to_owned()),
+                    index: 1,
+                    terminals: vec![Terminal {
+                        terminal_id: "terminal-1".to_owned(),
+                        working_directory: Some(PathBuf::from("/Users/example/project-a")),
+                    }],
+                }],
+            },
+        ]);
+
+        let rendered = render_inventory_table(&inventory);
+        let window_2_index = rendered
+            .find("window-2")
+            .expect("window-2 row should render");
+        let window_1_index = rendered
+            .find("window-1")
+            .expect("window-1 row should render");
+
+        assert!(window_2_index < window_1_index);
+    }
+
+    #[test]
+    fn renders_json_with_stable_field_names_nulls_and_sorted_tabs() {
+        let inventory = WindowInventory::from_windows(vec![Window {
+            window_id: "window-1".to_owned(),
+            window_name: None,
+            project_path: Some(PathBuf::from("/ignored/by-normalization")),
+            tabs: vec![
+                Tab {
+                    tab_id: "tab-2".to_owned(),
+                    tab_name: Some("Shell".to_owned()),
+                    index: 2,
+                    terminals: vec![Terminal {
+                        terminal_id: "terminal-2".to_owned(),
+                        working_directory: Some(PathBuf::from("/Users/example/project-b")),
+                    }],
+                },
+                Tab {
+                    tab_id: "tab-1".to_owned(),
+                    tab_name: None,
+                    index: 1,
+                    terminals: vec![Terminal {
+                        terminal_id: "terminal-1".to_owned(),
+                        working_directory: None,
+                    }],
+                },
+            ],
+        }]);
+
+        let rendered = render_inventory_json(&inventory).expect("json should render");
+        let value: Value = serde_json::from_str(&rendered).expect("json should parse");
+
+        assert!(value["windows"][0]["project_path"].is_null());
+        assert_eq!(value["windows"][0]["tabs"][0]["tab_id"], "tab-1");
+        assert_eq!(value["windows"][0]["tabs"][0]["index"], 1);
+        assert!(value["windows"][0]["tabs"][0]["terminals"][0]["working_directory"].is_null());
     }
 }

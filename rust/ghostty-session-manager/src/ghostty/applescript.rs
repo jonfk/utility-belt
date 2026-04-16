@@ -146,20 +146,23 @@ fn parse_row(line: &str, row_number: usize) -> Result<ParsedRow, Report<AppError
             .attach(format!("line={line}")));
     }
 
+    let window_id = required_text(fields[0], row_number, "window_id")?;
     let tab_index = fields[3]
         .parse::<usize>()
         .change_context(AppError::Parse)
         .attach(format!("row={row_number}"))
         .attach("field=tab_index")
         .attach(format!("value={}", fields[3]))?;
+    let tab_id = required_text(fields[2], row_number, "tab_id")?;
+    let terminal_id = required_text(fields[5], row_number, "terminal_id")?;
 
     Ok(ParsedRow {
-        window_id: fields[0].to_owned(),
+        window_id,
         window_name: optional_text(fields[1]),
-        tab_id: fields[2].to_owned(),
+        tab_id,
         tab_index,
         tab_name: optional_text(fields[4]),
-        terminal_id: fields[5].to_owned(),
+        terminal_id,
         working_directory: optional_path(fields[6]),
     })
 }
@@ -175,6 +178,20 @@ fn optional_text(value: &str) -> Option<String> {
 
 fn optional_path(value: &str) -> Option<PathBuf> {
     optional_text(value).map(PathBuf::from)
+}
+
+fn required_text(
+    value: &str,
+    row_number: usize,
+    field_name: &'static str,
+) -> Result<String, Report<AppError>> {
+    optional_text(value).ok_or_else(|| {
+        Report::new(AppError::Parse)
+            .attach(format!("Missing required TSV field: {field_name}"))
+            .attach(format!("row={row_number}"))
+            .attach(format!("field={field_name}"))
+            .attach(format!("value={value:?}"))
+    })
 }
 
 fn insert_row(windows: &mut Vec<Window>, row: ParsedRow) {
@@ -274,6 +291,48 @@ mod tests {
     }
 
     #[test]
+    fn rejects_blank_required_window_id() {
+        let report = parse_row(
+            " \tWorkspace\ttab-1\t1\tEditor\tterminal-1\t/Users/example",
+            2,
+        )
+        .expect_err("blank window id should fail");
+
+        let rendered = format!("{report:?}");
+        assert!(rendered.contains("Missing required TSV field: window_id"));
+        assert!(rendered.contains("row=2"));
+        assert!(rendered.contains("field=window_id"));
+    }
+
+    #[test]
+    fn rejects_blank_required_tab_id() {
+        let report = parse_row(
+            "window-1\tWorkspace\t \t1\tEditor\tterminal-1\t/Users/example",
+            4,
+        )
+        .expect_err("blank tab id should fail");
+
+        let rendered = format!("{report:?}");
+        assert!(rendered.contains("Missing required TSV field: tab_id"));
+        assert!(rendered.contains("row=4"));
+        assert!(rendered.contains("field=tab_id"));
+    }
+
+    #[test]
+    fn rejects_blank_required_terminal_id() {
+        let report = parse_row(
+            "window-1\tWorkspace\ttab-1\t1\tEditor\t \t/Users/example",
+            5,
+        )
+        .expect_err("blank terminal id should fail");
+
+        let rendered = format!("{report:?}");
+        assert!(rendered.contains("Missing required TSV field: terminal_id"));
+        assert!(rendered.contains("row=5"));
+        assert!(rendered.contains("field=terminal_id"));
+    }
+
+    #[test]
     fn later_tabs_do_not_override_first_tab_project_path() {
         let inventory = parse_window_inventory(concat!(
             "window-1\tWorkspace\ttab-2\t2\tShell\tterminal-2\t/Users/example/project-b\n",
@@ -334,6 +393,17 @@ mod tests {
     fn empty_stdout_produces_empty_inventory() {
         let inventory = parse_window_inventory("").expect("empty inventory is valid");
         assert!(inventory.windows.is_empty());
+    }
+
+    #[test]
+    fn first_tab_missing_working_directory_keeps_project_path_empty() {
+        let inventory = parse_window_inventory(concat!(
+            "window-1\tWorkspace\ttab-1\t1\tEditor\tterminal-1\t\n",
+            "window-1\tWorkspace\ttab-2\t2\tShell\tterminal-2\t/Users/example/project-b\n",
+        ))
+        .expect("inventory should parse");
+
+        assert_eq!(inventory.windows[0].project_path, None);
     }
 
     impl GhosttyClient {
