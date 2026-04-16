@@ -56,7 +56,7 @@ Reasons:
 - easy to inspect manually
 - easy to reset
 - no schema migration burden in the first phase
-- enough for MRU tracking and lightweight metadata
+- enough for MRU tracking, fast switch startup, and lightweight metadata
 
 SQLite can be introduced later if the state model becomes more complex.
 
@@ -67,19 +67,29 @@ Project identity is strictly path-based in the first version.
 Design consequence:
 
 - `project_path` is the primary key in persisted state
+- live Ghostty windows are still keyed by `window_id`, not by `project_path`
+- multiple live windows may share the same canonical `project_path`
 - aliases are deferred until a real need appears
 - matching behavior should stay simple and predictable early on
 
+This means the persistence model is project-scoped, while the live runtime
+model is window-scoped. A single project record may point at a preferred window
+for that project, but it does not imply that only one live Ghostty window can
+exist for that path.
+
 ### Source Of Truth
 
-Ghostty is the source of truth for live runtime state.
+Ghostty is the source of truth for live runtime state and imperative actions.
 
-The local JSON state file is supplemental metadata only.
+The local JSON state file is also used as a cached switch index.
 
 Design consequence:
 
-- windows, tabs, terminals, and focus are always discovered from Ghostty
-- local state stores only durable metadata such as MRU history
+- `ls` and live reconciliation steps query Ghostty directly
+- `switch` may render immediately from cached project records before a live
+  Ghostty query completes
+- local state may store denormalized hints such as last seen window id and last
+  seen window name
 - the application should not attempt to maintain an authoritative mirror of the
   full Ghostty runtime graph
 
@@ -97,7 +107,8 @@ The `switch` flow should be built in phases:
 
 - phase 2: basic browse-and-select TUI shell
 - phase 3: standalone search and ranking logic in Rust
-- phase 4: query-driven filtering and ranking inside the TUI
+- phase 4: stale-first filtering and ranking inside the TUI with live
+  reconciliation
 
 ## Platform Constraints
 
@@ -132,10 +143,18 @@ Important observations from the real dictionary:
 ## Terminology
 
 - `project`: canonical filesystem path used as the session identity
-- `window session`: a Ghostty window associated with a project
+- `window session`: a Ghostty window associated with a project path
 - `derived project path`: project path inferred from the first terminal in the
   first tab
 - `state store`: local JSON file with metadata not owned by Ghostty
+- `switch index`: cached per-project metadata used to render the `switch`
+  picker before live refresh completes
+
+Cardinality note:
+
+- one project path may map to zero, one, or many live Ghostty windows
+- one live Ghostty window maps to at most one derived project path in the first
+  version
 
 ## First-Pass Scope
 
@@ -160,9 +179,11 @@ Important caveat:
 
 Design response:
 
-- use Ghostty-derived working directory for discovery
-- persist a canonical project path in the local state store once a window is
-  known
+- use Ghostty-derived working directory for live discovery and reconciliation
+- persist a canonical project path and last-seen window hints in the local
+  state store once a window is known
+- allow `switch` to search persisted project records without waiting for a
+  fresh Ghostty query
 - prefer explicit state over re-deriving identity every time when available
 - only inspect the first terminal in the first tab in the first version
 
@@ -289,28 +310,34 @@ Terminal
 
 ```json
 {
-  "version": 1,
-  "projects": [
-    {
-      "project_path": "/Users/example/src/project-a",
-      "last_selected_at": "2026-04-15T12:00:00Z",
-      "selection_count": 42,
-      "last_window_id": "tab-group-600002952eb0"
+  "version": 2,
+  "projects": {
+    "/Users/example/src/project-a": {
+      "last_accessed_at": "2026-04-15T12:00:00Z",
+      "last_seen_at": "2026-04-15T12:05:10Z",
+      "last_window_id": "tab-group-600002952eb0",
+      "last_window_name": "project-a"
     }
-  ]
+  }
 }
 ```
 
 ### Notes On Persistence
 
 - `version` allows lightweight future migrations
-- `project_path` is the stable key
-- `last_window_id` is a hint, not a trusted permanent identifier
+- `project_path` is the stable key and should be the map key in persisted state
+- the state file doubles as a cached project index for `switch`
+- `last_window_id` is a hint for the preferred window for a project, not a
+  guarantee that the project has only one live window
 - Ghostty currently exposes window IDs as stable text values, so persisted IDs
   should be strings
 - timestamps should be stored in UTC
+- `last_seen_at` is a freshness hint for cached switch rows
+- `last_window_name` is optional display metadata for cached rows
 - persisted state should avoid storing full live window or tab inventories as
   authoritative data
+- stale project records are acceptable as cache entries as long as selection
+  resolution can recover or fail clearly
 
 ## AppleScript Strategy
 
@@ -346,42 +373,83 @@ keeps the AppleScript script dumb while Rust owns grouping and derivation.
 
 ## Sync Strategy
 
-The first version should use on-demand refresh, not continuous synchronization.
+The first version should use command-scoped refresh, not continuous
+synchronization.
 
 Ghostty does not currently provide a clean event subscription model for window,
 tab, terminal, or focus changes through the chosen integration path, so the
-application should avoid trying to track live changes incrementally in the
-background.
+application should avoid a daemon or continuous polling in the background.
+Instead, each command should choose its own freshness strategy.
 
-### Command Boundary Refresh
+### `ls` Refresh Strategy
 
-At the start of each command such as `ls` or `switch`:
+`ls` should favor correctness over startup latency.
+
+At the start of `ls`:
 
 1. query Ghostty for the current live snapshot
 2. load local JSON metadata
 3. merge live state with local metadata in memory
-4. perform the requested action
-5. persist any metadata updates after a successful action
+4. render the current inventory
 
-This keeps the model simple and correct even if Ghostty was changed outside the
-tool between invocations.
+This keeps listing accurate even if Ghostty was changed outside the tool
+between invocations.
 
-### Interactive Switcher Refresh
+### `switch` Refresh Strategy
 
-For the `switch` TUI:
+`switch` should favor startup latency over perfect first-paint accuracy.
 
-- fetch one Ghostty snapshot when the UI starts
-- keep selection state local in memory while the UI is open
-- add filtering and ranking locally in memory once search is introduced
-- optionally support manual refresh later
-- avoid background polling in the first version
+At the start of `switch`:
+
+1. load the local JSON state file
+2. build picker rows from the cached switch index
+3. render the picker immediately from cached data
+4. start at most one background `query_windows` call while the UI is open
+5. merge live data into the in-memory picker state when the query completes
+6. persist refreshed hints after a successful live merge or successful
+   selection
+
+Design constraints:
+
+- background refresh must not block first paint or first keystroke
+- there should be no periodic polling in the first version
+- manual refresh can be added later if one-shot background reconciliation is
+  insufficient
+- live merges should preserve the current query and selection state
+- when possible, rows should be updated in place rather than fully rebuilt to
+  reduce visible layout shift
+- cached rows remain project-scoped even though live refresh may discover
+  multiple windows for the same project path
+
+If live reconciliation finds duplicate windows for a single project path, the
+application should not assume that the project row uniquely identifies one live
+window. The cached row can continue to represent the project, but the live
+state must keep the matching `window_id` values distinct.
+
+### Selection Resolution
+
+When the user confirms a `switch` selection:
+
+1. if the selected project record has a `last_window_id`, attempt to focus that
+   window directly
+2. if focusing by cached window id fails, query Ghostty once and resolve by
+   canonical project path
+3. if exactly one matching live window is found, focus it and update cached
+   hints
+4. if multiple matching live windows are found, prefer the cached
+   `last_window_id` when it is still live; otherwise surface the live windows
+   as separate choices instead of guessing
+5. if no matching live window is found, fail with a clear error or hand off to
+   a future create/open flow
+
+This keeps the common path fast while still recovering from stale cache data.
 
 ### Optimistic Updates
 
 After app-initiated actions such as focusing a window, the application may
-update in-memory state optimistically for the remainder of the current command.
-Persisted metadata should still be limited to supplemental state, not treated
-as a complete live runtime snapshot.
+update the in-memory switch index optimistically for the remainder of the
+current command. Persisted metadata should still be limited to supplemental
+state and cached hints, not treated as a complete live runtime snapshot.
 
 ## Ranking Strategy
 
@@ -391,6 +459,7 @@ The switcher should combine:
 - extra weight for basename matches
 - recency from the local state file
 - optional exact-match bonuses
+- optional preference for entries confirmed by the most recent live refresh
 
 The final scoring model does not need to be perfect initially. It only needs to
 preserve the most important behavior from the tmux flow:
@@ -424,16 +493,22 @@ Possible future modes:
 
 Responsibilities:
 
-- load Ghostty windows
 - load persistent state
-- render an interactive picker
-- focus the selected window
-- update MRU state
+- render an interactive picker immediately from cached project records
+- refresh live Ghostty windows once in the background
+- focus the selected window using cached hints first and live reconciliation
+  second
+- handle duplicate live windows for the same project path without collapsing
+  them into one runtime identity
+- update MRU state and cached window hints
 
 Staged delivery:
 
 - initial TUI shell supports browse, selection movement, confirm, and cancel
+- cached switch startup can ship before background live merge exists
 - search and ranking are implemented separately, then integrated into the TUI
+- background live merge and selection fallback can follow once the cached path
+  is stable
 
 ## Error Handling
 
@@ -444,6 +519,7 @@ Important failure cases:
 - Automation permission denied
 - Ghostty AppleScript dictionary changed since the snapshot the tool was built
   against
+- cached `last_window_id` no longer points at a live window
 - no readable working directory for a window
 - corrupted or missing JSON state file
 
@@ -451,6 +527,7 @@ Design stance:
 
 - fail with plain, actionable errors
 - keep state-file recovery simple
+- recover from stale cache with one live reconciliation query when feasible
 - avoid silent fallbacks that obscure why automation failed
 
 ## Observability
@@ -460,6 +537,8 @@ Useful early diagnostics:
 - `--json` output for machine inspection
 - `--verbose` for printing AppleScript invocation details
 - clear parse errors when script output is malformed
+- timing breakdown between cached picker startup, live refresh, and selection
+  reconciliation
 - a checked-in dictionary snapshot in `reference/Ghostty.sdef` for diffing
   against future Ghostty releases
 
@@ -477,7 +556,13 @@ find and inspect.
 1. Implement `ls` using a single AppleScript query and simple stdout output.
 2. Add Rust domain types and parsing for Ghostty query results.
 3. Add JSON state loading and saving.
-4. Build a basic interactive `switch` TUI shell with `ratatui`.
-5. Add standalone search and ranking logic with `frizbee`.
-6. Plug search into the `switch` TUI.
-7. Refine heuristics around project identity and window reuse.
+4. Extend persisted project records with cached switch hints such as
+   `last_window_id` and `last_seen_at`.
+5. Build a basic interactive `switch` TUI shell with `ratatui` that can render
+   from cached state immediately.
+6. Add standalone search and ranking logic with `frizbee`.
+7. Plug search into the `switch` TUI.
+8. Add one-shot live reconciliation for `switch`, including in-place UI merge
+   and selection fallback by project path.
+9. Refine heuristics around project identity, stale-record pruning, and window
+   reuse.

@@ -16,7 +16,8 @@ Create a CLI-first tool that treats Ghostty windows like project sessions.
 
 Each Ghostty window should represent an active project workspace:
 
-- One window maps to one project.
+- A window maps to one project path, but a project may have multiple Ghostty
+  windows in practice.
 - Tabs inside that window represent different work contexts for the same project.
 - The project identity is based on a working directory path.
 - Switching between projects should feel as fast and intentional as switching
@@ -31,7 +32,8 @@ The workflow should support:
 - Preferring matches on the final path segment, since that is usually the
   project name.
 - Prioritizing recently used project windows.
-- Focusing an existing project window instead of creating duplicates.
+- Focusing a preferred existing project window instead of creating unnecessary
+  duplicates.
 - Creating a new project window when one does not already exist.
 - Expanding an existing project window with more tabs over time.
 
@@ -42,6 +44,10 @@ The tool creates a lightweight session layer on top of Ghostty:
 - `tmux session` becomes `Ghostty window`
 - `tmux windows/panes` becomes `Ghostty tabs/terminals`
 - `session switcher` becomes `project window switcher`
+
+The project path is the session identity. Specific live windows are still
+identified separately by Ghostty window ID, because more than one live window
+may exist for the same project path.
 
 The point is not to recreate tmux exactly. The point is to preserve the useful
 parts of the workflow:
