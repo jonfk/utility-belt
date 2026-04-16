@@ -57,6 +57,10 @@ install-codex-notify:
     cp -f $(pwd)/python/codex-notify/* ~/.local/share/codex-notify/
     ln -sf $(pwd)/python/codex-notify.py ~/.local/bin/codex-notify
 
+# Install ghostty-session-manager using cargo
+install-ghostty-session-manager:
+    cargo install --path rust/ghostty-session-manager --locked --force
+
 # Install yt-transcript script
 install-yt-transcript:
     mkdir -p ~/.local/bin

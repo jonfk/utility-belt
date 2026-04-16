@@ -4,6 +4,7 @@ set -euo pipefail
 UTILITY_BELT_PROGRAMS=(
   beautiful-mermaid
   codex-notify
+  ghostty-session-manager
   git-smart-branch-delete
   git-smart-commit
   git-smart-push
