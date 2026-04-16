@@ -5,6 +5,7 @@ mod table;
 use std::io::{self, Write};
 
 use error_stack::{Report, ResultExt};
+use tracing::info_span;
 
 use crate::application::{SwitchWindow, complete_switch, list_windows, prepare_switch};
 use crate::error::AppError;
@@ -16,12 +17,22 @@ pub use args::Cli;
 use args::Command;
 
 pub fn run(cli: Cli) -> Result<(), Report<AppError>> {
+    let command_name = match &cli.command {
+        Command::Ls { .. } => "ls",
+        Command::Switch => "switch",
+    };
+    let command_span = info_span!("command", command = command_name);
     let ghostty = GhosttyClient::new(cli.verbose);
     let state_store = StateStore::from_default_path()?;
 
     match cli.command {
-        Command::Ls { json: render_json } => run_ls(&ghostty, &state_store, render_json),
-        Command::Switch => run_switch(&ghostty, &state_store),
+        Command::Ls { json: render_json } => {
+            let _command_enter = command_span.enter();
+            let run_span = info_span!("cli.run", command = "ls");
+            let _run_enter = run_span.enter();
+            run_ls(&ghostty, &state_store, render_json)
+        }
+        Command::Switch => run_switch(&ghostty, &state_store, &command_span),
     }
 }
 
@@ -30,6 +41,11 @@ fn run_ls(
     state_store: &StateStore,
     render_json: bool,
 ) -> Result<(), Report<AppError>> {
+    let span = info_span!(
+        "cli.run_ls",
+        renderer = if render_json { "json" } else { "table" }
+    );
+    let _enter = span.enter();
     let inventory = list_windows(ghostty, state_store)?;
     let rendered = if render_json {
         json::render_inventory(&inventory)?
@@ -40,31 +56,67 @@ fn run_ls(
     write_stdout(&rendered)
 }
 
-fn run_switch(ghostty: &GhosttyClient, state_store: &StateStore) -> Result<(), Report<AppError>> {
-    let mut context = prepare_switch(ghostty, state_store)?;
-    let entries = context
-        .windows
-        .iter()
-        .map(picker_entry_from_window)
-        .collect();
+fn run_switch(
+    ghostty: &GhosttyClient,
+    state_store: &StateStore,
+    command_span: &tracing::Span,
+) -> Result<(), Report<AppError>> {
+    let run_span = info_span!("cli.run", command = "switch");
+    let mut context = {
+        let _command_enter = command_span.enter();
+        let _run_enter = run_span.enter();
+        prepare_switch(ghostty, state_store)?
+    };
+    let entries = {
+        let _command_enter = command_span.enter();
+        let _run_enter = run_span.enter();
+        let entries_span = info_span!("cli.build_picker_entries");
+        let _entries_enter = entries_span.enter();
+        context
+            .windows
+            .iter()
+            .map(picker_entry_from_window)
+            .collect()
+    };
 
-    match tui::run_picker(entries)? {
+    match tui::run_picker(entries, command_span, &run_span)? {
         PickerOutcome::Confirm(entry) => {
-            let selection = context
-                .windows
-                .iter()
-                .find(|window| window.window_id == entry.window_id)
-                .ok_or_else(|| {
-                    Report::new(AppError::Tui)
-                        .attach("Selected picker row no longer matches a Ghostty window")
-                })?;
-            complete_switch(ghostty, state_store, &mut context.state, selection)
+            let selection = {
+                let _command_enter = command_span.enter();
+                let _run_enter = run_span.enter();
+                let selection_span = info_span!(
+                    "cli.resolve_selection",
+                    window_id = entry.window_id.as_str()
+                );
+                let _selection_enter = selection_span.enter();
+                context
+                    .windows
+                    .iter()
+                    .find(|window| window.window_id == entry.window_id)
+                    .ok_or_else(|| {
+                        Report::new(AppError::Tui)
+                            .attach("Selected picker row no longer matches a Ghostty window")
+                    })?
+                    .clone()
+            };
+
+            let _command_enter = command_span.enter();
+            let _run_enter = run_span.enter();
+            complete_switch(ghostty, state_store, &mut context.state, &selection)
         }
-        PickerOutcome::Cancel => Ok(()),
+        PickerOutcome::Cancel => {
+            let _command_enter = command_span.enter();
+            let _run_enter = run_span.enter();
+            let cancel_span = info_span!("cli.switch_cancelled");
+            let _cancel_enter = cancel_span.enter();
+            Ok(())
+        }
     }
 }
 
 fn write_stdout(rendered: &str) -> Result<(), Report<AppError>> {
+    let span = info_span!("cli.write_stdout", bytes = rendered.len());
+    let _enter = span.enter();
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{rendered}")
         .change_context(AppError::Output)

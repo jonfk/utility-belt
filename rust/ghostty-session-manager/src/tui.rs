@@ -15,6 +15,7 @@ use ratatui::{
     text::Line,
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
+use tracing::info_span;
 
 use crate::error::AppError;
 
@@ -77,35 +78,60 @@ impl PickerState {
     }
 }
 
-pub fn run_picker(entries: Vec<PickerEntry>) -> Result<PickerOutcome, Report<AppError>> {
+pub fn run_picker(
+    entries: Vec<PickerEntry>,
+    command_span: &tracing::Span,
+    run_span: &tracing::Span,
+) -> Result<PickerOutcome, Report<AppError>> {
     if entries.is_empty() {
         return Err(Report::new(AppError::Tui).attach("Cannot open picker with no entries"));
     }
 
-    enable_raw_mode()
-        .change_context(AppError::Tui)
-        .attach("Failed to enable terminal raw mode for switch picker")?;
+    let mut terminal = {
+        let _command_enter = command_span.enter();
+        let _run_enter = run_span.enter();
+        let setup_span = info_span!("tui.setup", entries = entries.len());
+        let _setup_enter = setup_span.enter();
 
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, cursor::Hide)
-        .change_context(AppError::Tui)
-        .attach("Failed to enter alternate screen for switch picker")?;
+        enable_raw_mode()
+            .change_context(AppError::Tui)
+            .attach("Failed to enable terminal raw mode for switch picker")?;
+
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen, cursor::Hide)
+            .change_context(AppError::Tui)
+            .attach("Failed to enter alternate screen for switch picker")?;
+
+        let backend = CrosstermBackend::new(stdout);
+        Terminal::new(backend)
+            .change_context(AppError::Tui)
+            .attach("Failed to initialize terminal backend for switch picker")?
+    };
     let _cleanup = TerminalCleanup;
-
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)
-        .change_context(AppError::Tui)
-        .attach("Failed to initialize terminal backend for switch picker")?;
 
     let mut state = PickerState::new(entries);
 
     loop {
-        terminal
-            .draw(|frame| render_picker(frame, &state))
-            .change_context(AppError::Tui)
-            .attach("Failed to draw switch picker")?;
+        {
+            let _command_enter = command_span.enter();
+            let _run_enter = run_span.enter();
+            let draw_span = info_span!("tui.draw", selected_index = state.selected_index());
+            let _draw_enter = draw_span.enter();
+            terminal
+                .draw(|frame| render_picker(frame, &state))
+                .change_context(AppError::Tui)
+                .attach("Failed to draw switch picker")?;
+        }
 
-        if let Some(outcome) = handle_key_event(read_key_event()?, &mut state) {
+        let key_event = read_key_event()?;
+
+        if let Some(outcome) = {
+            let _command_enter = command_span.enter();
+            let _run_enter = run_span.enter();
+            let handle_span = info_span!("tui.handle_key_event", key = ?key_event.code);
+            let _handle_enter = handle_span.enter();
+            handle_key_event(key_event, &mut state)
+        } {
             return Ok(outcome);
         }
     }

@@ -1,9 +1,15 @@
 use error_stack::{Report, ResultExt};
+use tracing::info_span;
 
 use crate::application::ListedWindows;
 use crate::error::AppError;
 
 pub fn render_inventory(inventory: &ListedWindows) -> Result<String, Report<AppError>> {
+    let span = info_span!(
+        "cli.render_json_inventory",
+        windows = inventory.windows.len()
+    );
+    let _enter = span.enter();
     serde_json::to_string_pretty(inventory)
         .change_context(AppError::Output)
         .attach("Failed to serialize Ghostty window inventory as JSON")

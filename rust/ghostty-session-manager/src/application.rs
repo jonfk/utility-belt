@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use error_stack::{Report, ResultExt};
 use jiff::Timestamp;
 use serde::Serialize;
+use tracing::info_span;
 
 use crate::domain::{Tab, Terminal, Window, WindowInventory};
 use crate::error::AppError;
@@ -13,6 +14,8 @@ pub fn list_windows(
     ghostty: &GhosttyClient,
     state_store: &StateStore,
 ) -> Result<ListedWindows, Report<AppError>> {
+    let span = info_span!("application.list_windows");
+    let _enter = span.enter();
     let (inventory, state) = load_inventory_and_state(ghostty, state_store)?;
     Ok(ListedWindows::from_live_and_state(&inventory, &state))
 }
@@ -21,6 +24,8 @@ pub fn prepare_switch(
     ghostty: &GhosttyClient,
     state_store: &StateStore,
 ) -> Result<SwitchContext, Report<AppError>> {
+    let span = info_span!("application.prepare_switch");
+    let _enter = span.enter();
     let (inventory, state) = load_inventory_and_state(ghostty, state_store)?;
     let listed = ListedWindows::from_live_and_state(&inventory, &state);
 
@@ -46,6 +51,12 @@ pub fn complete_switch(
     state: &mut StateFile,
     selection: &SwitchWindow,
 ) -> Result<(), Report<AppError>> {
+    let span = info_span!(
+        "application.complete_switch",
+        window_id = selection.window_id.as_str(),
+        has_project_path = selection.project_path.is_some()
+    );
+    let _enter = span.enter();
     ghostty
         .focus_window(&selection.window_id)
         .change_context(AppError::Ghostty)
@@ -172,6 +183,8 @@ fn load_inventory_and_state(
     ghostty: &GhosttyClient,
     state_store: &StateStore,
 ) -> Result<(WindowInventory, StateFile), Report<AppError>> {
+    let span = info_span!("application.load_inventory_and_state");
+    let _enter = span.enter();
     let inventory = ghostty
         .query_windows()
         .change_context(AppError::Ghostty)

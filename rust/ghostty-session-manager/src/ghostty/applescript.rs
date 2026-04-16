@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use error_stack::{Report, ResultExt};
+use tracing::info_span;
 
 use crate::domain::{Tab, Terminal, Window, WindowInventory};
 use crate::error::AppError;
@@ -101,11 +102,15 @@ impl GhosttyClient {
     }
 
     pub fn query_windows(&self) -> Result<WindowInventory, Report<AppError>> {
+        let span = info_span!("ghostty.query_windows");
+        let _enter = span.enter();
         let stdout = self.run_query_script("query_windows", QUERY_WINDOWS_SCRIPT)?;
         parse_window_inventory(&stdout)
     }
 
     pub fn focus_window(&self, window_id: &str) -> Result<(), Report<AppError>> {
+        let span = info_span!("ghostty.focus_window", window_id = window_id);
+        let _enter = span.enter();
         let script = FOCUS_WINDOW_SCRIPT_TEMPLATE
             .replace("__WINDOW_ID__", &escape_applescript_string(window_id));
         self.run_query_script("focus_window", &script)?;
@@ -117,6 +122,8 @@ impl GhosttyClient {
         action_name: &str,
         script: &str,
     ) -> Result<String, Report<AppError>> {
+        let span = info_span!("ghostty.run_query_script", action = action_name);
+        let _enter = span.enter();
         if self.verbose {
             eprintln!("Running Ghostty AppleScript action: {action_name}");
         }
@@ -149,6 +156,12 @@ struct ParsedRow {
 }
 
 fn parse_window_inventory(stdout: &str) -> Result<WindowInventory, Report<AppError>> {
+    let span = info_span!(
+        "ghostty.parse_window_inventory",
+        bytes = stdout.len(),
+        lines = stdout.lines().count()
+    );
+    let _enter = span.enter();
     let mut windows: Vec<Window> = Vec::new();
 
     for (row_index, line) in stdout.lines().enumerate() {

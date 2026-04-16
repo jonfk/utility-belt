@@ -1,8 +1,15 @@
 use std::path::Path;
 
+use tracing::info_span;
+
 use crate::application::ListedWindows;
 
 pub fn render_inventory(inventory: &ListedWindows) -> String {
+    let span = info_span!(
+        "cli.render_table_inventory",
+        windows = inventory.windows.len()
+    );
+    let _enter = span.enter();
     let headers = ["WINDOW ID", "WINDOW NAME", "PROJECT PATH", "TAB COUNT"];
     let rows: Vec<[String; 4]> = inventory
         .windows

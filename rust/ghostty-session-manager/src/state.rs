@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use error_stack::{Report, ResultExt};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use tracing::info_span;
 
 use crate::error::AppError;
 
@@ -75,6 +76,8 @@ impl StateStore {
     }
 
     pub fn load(&self) -> Result<StateFile, Report<AppError>> {
+        let span = info_span!("state.load", path = self.path.display().to_string());
+        let _enter = span.enter();
         let contents = match fs::read_to_string(&self.path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -100,6 +103,12 @@ impl StateStore {
     }
 
     pub fn save(&self, state: &StateFile) -> Result<(), Report<AppError>> {
+        let span = info_span!(
+            "state.save",
+            path = self.path.display().to_string(),
+            projects = state.projects.len()
+        );
+        let _enter = span.enter();
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)
                 .change_context(AppError::State)
