@@ -51,6 +51,16 @@ Reasons:
 
 SQLite can be introduced later if the state model becomes more complex.
 
+### Project Identity
+
+Project identity is strictly path-based in the first version.
+
+Design consequence:
+
+- `project_path` is the primary key in persisted state
+- aliases are deferred until a real need appears
+- matching behavior should stay simple and predictable early on
+
 ### Interactive UI
 
 Interactive switching will use:
@@ -110,6 +120,19 @@ Design response:
 - persist a canonical project path in the local state store once a window is
   known
 - prefer explicit state over re-deriving identity every time when available
+- only inspect the first tab in the first version
+
+Scanning all tabs is deferred. If added later, that would mean using any tab's
+working directory as a lookup signal for finding the right window. It would not
+mean switching directly to a specific tab in the first pass unless that becomes
+an explicit product decision.
+
+### Focus Behavior
+
+The first version should focus a Ghostty window directly.
+
+More granular terminal or tab focus can be added later if direct window focus
+proves too imprecise in practice.
 
 ## Architecture
 
@@ -177,8 +200,7 @@ GhosttyTerminal
       "project_path": "/Users/example/src/project-a",
       "last_selected_at": "2026-04-15T12:00:00Z",
       "selection_count": 42,
-      "last_window_id": 1234,
-      "aliases": ["project-a"]
+      "last_window_id": 1234
     }
   ]
 }
@@ -292,17 +314,7 @@ Useful early diagnostics:
 - `--verbose` for printing AppleScript invocation details
 - clear parse errors when script output is malformed
 
-## Open Questions
-
-- Should project identity be strictly path-based, or should user-defined aliases
-  be first-class early on?
-- Should a Ghostty window be matched by first-tab path only, or should all tabs
-  be scanned when looking for a project?
-- Should the tool focus a window directly, or focus a specific terminal inside
-  that window for more predictable behavior?
-- Where should the JSON state file live by default?
-
-## Proposed Default State File Location
+## Default State File Location
 
 Unless repository-local state is explicitly desired, a reasonable default is:
 
