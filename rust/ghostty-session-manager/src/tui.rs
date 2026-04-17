@@ -297,6 +297,9 @@ fn poll_key_event(timeout: Duration) -> Result<Option<KeyEvent>, Report<AppError
 
 fn handle_key_event(key_event: KeyEvent, state: &mut PickerState) -> Option<PickerOutcome> {
     match key_event.code {
+        KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(state.cancel())
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_up();
             None
@@ -327,7 +330,7 @@ fn render_picker(frame: &mut Frame, state: &PickerState) {
     ])
     .areas(frame.area());
 
-    let instructions = Paragraph::new("Up/k Down/j move  Enter select  Esc/q cancel").block(
+    let instructions = Paragraph::new("Up/k Down/j move  Enter select  Esc/q/Ctrl+C cancel").block(
         Block::default()
             .borders(Borders::ALL)
             .title("Ghostty Switch"),
@@ -557,6 +560,16 @@ mod tests {
         );
 
         assert_eq!(state.query(), "");
+    }
+
+    #[test]
+    fn handle_key_event_ctrl_c_returns_cancel() {
+        let mut state = PickerState::new(sample_entries(), sample_projects());
+
+        assert_eq!(
+            handle_key_event(ctrl_key_event('c'), &mut state),
+            Some(PickerOutcome::Cancel)
+        );
     }
 
     #[test]
@@ -833,6 +846,10 @@ mod tests {
 
     fn key_event(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl_key_event(character: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL)
     }
 
     fn parse_timestamp(input: &str) -> Timestamp {
