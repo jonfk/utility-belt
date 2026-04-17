@@ -2,6 +2,7 @@ mod args;
 mod json;
 mod table;
 
+use std::env;
 use std::io::{self, Write};
 use std::sync::mpsc;
 use std::thread;
@@ -70,7 +71,8 @@ fn run_switch(
     let mut context = {
         let _command_enter = command_span.enter();
         let _run_enter = run_span.enter();
-        prepare_switch(ghostty, state_store)?
+        let invocation_cwd = env::current_dir().ok();
+        prepare_switch(ghostty, state_store, invocation_cwd.as_deref())?
     };
     let initial_projects = context.state.projects.clone();
     let entries = {
@@ -104,6 +106,7 @@ fn run_switch(
     match tui::run_picker(
         entries,
         initial_projects,
+        context.current_project_key.clone(),
         refresh_receiver,
         |inventory| {
             let refresh =
@@ -188,7 +191,11 @@ fn picker_entry_from_window(window: &SwitchWindow) -> PickerEntry {
             .map(|project_path| project_path.display().to_string())
             .unwrap_or_else(|| window.window_id.clone()),
         window_id: window.window_id.clone(),
-        title: window.title.clone(),
-        detail: window.detail.clone(),
+        primary_label: window.title.clone(),
+        secondary_path: window
+            .project_path
+            .as_ref()
+            .map(|project_path| project_path.display().to_string()),
+        window_name: window.window_name.clone(),
     }
 }
