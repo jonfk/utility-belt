@@ -290,7 +290,6 @@ impl PickerState {
     }
 
     fn refresh_filtered_projects(&mut self) {
-        let previous_selection = self.selected_project_key.clone();
         self.filtered_projects = rank_projects(
             &self.query,
             &self.projects,
@@ -303,20 +302,10 @@ impl PickerState {
         })
         .collect();
 
-        self.selected_project_key = match previous_selection {
-            Some(previous_selection)
-                if self
-                    .filtered_projects
-                    .iter()
-                    .any(|project_match| project_match.project_key == previous_selection) =>
-            {
-                Some(previous_selection)
-            }
-            _ => self
-                .filtered_projects
-                .first()
-                .map(|project_match| project_match.project_key.clone()),
-        };
+        self.selected_project_key = self
+            .filtered_projects
+            .first()
+            .map(|project_match| project_match.project_key.clone());
     }
 }
 
@@ -927,6 +916,11 @@ mod tests {
 
         assert_eq!(state.query(), "project-");
         assert_eq!(state.filtered_entries().len(), 3);
+        assert_eq!(state.selected_index(), Some(0));
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(sample_entry("c", "window-3"))
+        );
     }
 
     #[test]
@@ -939,10 +933,10 @@ mod tests {
         assert_eq!(handle_key_event(ctrl_key_event('u'), &mut state, 5), None);
 
         assert_eq!(state.query(), "");
-        assert_eq!(state.selected_index(), Some(2));
+        assert_eq!(state.selected_index(), Some(0));
         assert_eq!(
             state.confirm(),
-            PickerOutcome::Confirm(sample_entry("b", "window-2"))
+            PickerOutcome::Confirm(sample_entry("c", "window-3"))
         );
     }
 
@@ -965,6 +959,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["/tmp/project-a", "/tmp/project-b", "/tmp/project-c"]
         );
+        assert_eq!(state.selected_index(), Some(0));
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(sample_entry("a", "window-1"))
+        );
     }
 
     #[test]
@@ -977,6 +976,11 @@ mod tests {
         assert_eq!(handle_key_event(ctrl_key_event('w'), &mut state, 5), None);
 
         assert_eq!(state.query(), "project ");
+        assert_eq!(state.selected_index(), Some(0));
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(sample_entry("c", "window-3"))
+        );
     }
 
     #[test]
@@ -992,15 +996,21 @@ mod tests {
         );
 
         assert_eq!(state.query(), "project ");
+        assert_eq!(state.selected_index(), Some(0));
+        assert_eq!(
+            state.confirm(),
+            PickerOutcome::Confirm(sample_entry("c", "window-3"))
+        );
     }
 
     #[test]
-    fn selection_is_preserved_by_project_key_when_still_visible() {
+    fn typing_query_resets_selection_to_first_filtered_result() {
         let mut state = PickerState::new(sample_entries(), sample_projects(), None);
         state.move_down();
 
         state.append_query_char('a');
 
+        assert_eq!(state.selected_index(), Some(0));
         assert_eq!(
             state.confirm(),
             PickerOutcome::Confirm(sample_entry("a", "window-1"))
@@ -1141,16 +1151,17 @@ mod tests {
     }
 
     #[test]
-    fn apply_refresh_preserves_selection_when_selected_project_still_exists() {
+    fn apply_refresh_resets_selection_to_first_filtered_result() {
         let projects = sample_projects();
         let mut state = PickerState::new(sample_entries(), projects.clone(), None);
         state.move_down();
 
         state.apply_refresh(sample_entries(), projects);
 
+        assert_eq!(state.selected_index(), Some(0));
         assert_eq!(
             state.confirm(),
-            PickerOutcome::Confirm(sample_entry("a", "window-1"))
+            PickerOutcome::Confirm(sample_entry("c", "window-3"))
         );
     }
 
