@@ -123,13 +123,6 @@ impl PickerState {
             .position(|project_match| &project_match.project_key == selected_project_key)
     }
 
-    pub fn filtered_entries(&self) -> Vec<&PickerEntry> {
-        self.filtered_projects
-            .iter()
-            .filter_map(|project_match| self.entries_by_project_key.get(&project_match.project_key))
-            .collect()
-    }
-
     fn filtered_render_entries(&self) -> Vec<(&PickerEntry, &RankedProjectMatch)> {
         self.filtered_projects
             .iter()
@@ -839,11 +832,7 @@ mod tests {
         let state = PickerState::new(sample_entries(), sample_projects(), None);
 
         assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
+            filtered_project_keys(&state),
             vec!["/tmp/project-c", "/tmp/project-a", "/tmp/project-b"]
         );
     }
@@ -857,11 +846,7 @@ mod tests {
         );
 
         assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
+            filtered_project_keys(&state),
             vec!["/tmp/project-a", "/tmp/project-b", "/tmp/project-c"]
         );
     }
@@ -873,14 +858,7 @@ mod tests {
         state.append_query_char('b');
 
         assert_eq!(state.query(), "b");
-        assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
-            vec!["/tmp/project-b"]
-        );
+        assert_eq!(filtered_project_keys(&state), vec!["/tmp/project-b"]);
     }
 
     #[test]
@@ -896,11 +874,7 @@ mod tests {
         }
 
         assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
+            filtered_project_keys(&state),
             vec!["/tmp/project-c", "/tmp/project-b", "/tmp/project-a"]
         );
     }
@@ -915,7 +889,7 @@ mod tests {
         state.pop_query_char();
 
         assert_eq!(state.query(), "project-");
-        assert_eq!(state.filtered_entries().len(), 3);
+        assert_eq!(filtered_project_keys(&state).len(), 3);
         assert_eq!(state.selected_index(), Some(0));
         assert_eq!(
             state.confirm(),
@@ -952,11 +926,7 @@ mod tests {
         state.clear_query();
 
         assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
+            filtered_project_keys(&state),
             vec!["/tmp/project-a", "/tmp/project-b", "/tmp/project-c"]
         );
         assert_eq!(state.selected_index(), Some(0));
@@ -1110,14 +1080,7 @@ mod tests {
         state.apply_refresh(sample_entries(), projects);
 
         assert_eq!(state.query(), "project-c");
-        assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
-            vec!["/tmp/project-c"]
-        );
+        assert_eq!(filtered_project_keys(&state), vec!["/tmp/project-c"]);
     }
 
     #[test]
@@ -1136,11 +1099,7 @@ mod tests {
         state.apply_refresh(refreshed_entries(), projects);
 
         assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
+            filtered_project_keys(&state),
             vec![
                 "/tmp/project-d",
                 "/tmp/project-a",
@@ -1194,11 +1153,7 @@ mod tests {
         state.apply_refresh(refreshed_entries(), projects);
 
         assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
+            filtered_project_keys(&state),
             vec![
                 "/tmp/project-d",
                 "/tmp/project-c",
@@ -1254,11 +1209,7 @@ mod tests {
         state.pop_query_char();
 
         assert_eq!(
-            state
-                .filtered_entries()
-                .into_iter()
-                .map(|entry| entry.project_key.as_str())
-                .collect::<Vec<_>>(),
+            filtered_project_keys(&state),
             vec![
                 "/tmp/project-d",
                 "/tmp/project-c",
@@ -1315,6 +1266,14 @@ mod tests {
         let selected_cell = buffer.cell((2, 1)).expect("selected row cell should exist");
 
         assert_eq!(selected_cell.bg, SELECTED_ROW_BG);
+    }
+
+    fn filtered_project_keys(state: &PickerState) -> Vec<&str> {
+        state
+            .filtered_projects
+            .iter()
+            .map(|project_match| project_match.project_key.as_str())
+            .collect()
     }
 
     fn sample_entries() -> Vec<PickerEntry> {

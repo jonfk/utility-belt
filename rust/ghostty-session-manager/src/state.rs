@@ -139,14 +139,6 @@ impl StateStore {
         })
     }
 
-    pub fn from_path(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub fn load(&self) -> Result<StateFile, Report<AppError>> {
         let span = info_span!("state.load", path = self.path.display().to_string());
         let _enter = span.enter();
@@ -267,9 +259,12 @@ fn default_state_file_path() -> Result<PathBuf, Report<AppError>> {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use jiff::Timestamp;
@@ -280,97 +275,98 @@ mod tests {
 
     #[test]
     fn missing_file_loads_as_empty_state() {
-        let temp_dir = unique_test_dir();
-        let store = StateStore::from_path(temp_dir.join("state.json"));
+        with_test_store(|_, store| {
+            let state = store.load().expect("missing file should be empty");
 
-        let state = store.load().expect("missing file should be empty");
-
-        assert_eq!(state, StateFile::empty());
+            assert_eq!(state, StateFile::empty());
+        });
     }
 
     #[test]
     fn empty_file_loads_as_empty_state() {
-        let temp_dir = unique_test_dir();
-        let path = temp_dir.join("state.json");
-        fs::create_dir_all(&temp_dir).expect("temp dir should exist");
-        fs::write(&path, "").expect("empty file should be written");
-        let store = StateStore::from_path(path);
+        with_test_store(|path, store| {
+            fs::create_dir_all(
+                path.parent()
+                    .expect("default state path should have a parent directory"),
+            )
+            .expect("temp dir should exist");
+            fs::write(path, "").expect("empty file should be written");
 
-        let state = store.load().expect("empty file should be empty");
+            let state = store.load().expect("empty file should be empty");
 
-        assert_eq!(state, StateFile::empty());
+            assert_eq!(state, StateFile::empty());
+        });
     }
 
     #[test]
     fn whitespace_only_file_loads_as_empty_state() {
-        let temp_dir = unique_test_dir();
-        let path = temp_dir.join("state.json");
-        fs::create_dir_all(&temp_dir).expect("temp dir should exist");
-        fs::write(&path, "  \n\t").expect("whitespace file should be written");
-        let store = StateStore::from_path(path);
+        with_test_store(|path, store| {
+            fs::create_dir_all(
+                path.parent()
+                    .expect("default state path should have a parent directory"),
+            )
+            .expect("temp dir should exist");
+            fs::write(path, "  \n\t").expect("whitespace file should be written");
 
-        let state = store.load().expect("whitespace file should be empty");
+            let state = store.load().expect("whitespace file should be empty");
 
-        assert_eq!(state, StateFile::empty());
+            assert_eq!(state, StateFile::empty());
+        });
     }
 
     #[test]
     fn malformed_json_returns_state_error() {
-        let temp_dir = unique_test_dir();
-        let path = temp_dir.join("state.json");
-        fs::create_dir_all(&temp_dir).expect("temp dir should exist");
-        fs::write(&path, "{not json").expect("malformed file should be written");
-        let store = StateStore::from_path(path);
+        with_test_store(|path, store| {
+            fs::create_dir_all(
+                path.parent()
+                    .expect("default state path should have a parent directory"),
+            )
+            .expect("temp dir should exist");
+            fs::write(path, "{not json").expect("malformed file should be written");
 
-        let report = store.load().expect_err("malformed json should fail");
+            let report = store.load().expect_err("malformed json should fail");
 
-        assert!(format!("{report:?}").contains("Failed to parse state file"));
+            assert!(format!("{report:?}").contains("Failed to parse state file"));
+        });
     }
 
     #[test]
     fn save_creates_parent_directories() {
-        let temp_dir = unique_test_dir();
-        let path = temp_dir.join("nested").join("state.json");
-        let store = StateStore::from_path(&path);
+        with_test_store(|path, store| {
+            store
+                .save(&sample_state_file())
+                .expect("save should create parent dirs");
 
-        assert_eq!(store.path(), path.as_path());
-
-        store
-            .save(&sample_state_file())
-            .expect("save should create parent dirs");
-
-        assert!(path.exists());
+            assert!(path.exists());
+        });
     }
 
     #[test]
     fn save_and_load_round_trip_projects_and_timestamps() {
-        let temp_dir = unique_test_dir();
-        let path = temp_dir.join("state.json");
-        let store = StateStore::from_path(path);
-        let expected = sample_state_file();
+        with_test_store(|_, store| {
+            let expected = sample_state_file();
 
-        store.save(&expected).expect("state should save");
-        let loaded = store.load().expect("state should load");
+            store.save(&expected).expect("state should save");
+            let loaded = store.load().expect("state should load");
 
-        assert_eq!(loaded, expected);
+            assert_eq!(loaded, expected);
+        });
     }
 
     #[test]
     fn save_writes_pretty_printed_json_with_version_one() {
-        let temp_dir = unique_test_dir();
-        let path = temp_dir.join("state.json");
-        let store = StateStore::from_path(&path);
+        with_test_store(|path, store| {
+            store
+                .save(&sample_state_file())
+                .expect("state should save cleanly");
 
-        store
-            .save(&sample_state_file())
-            .expect("state should save cleanly");
-
-        let rendered = fs::read_to_string(path).expect("state file should be readable");
-        assert!(rendered.contains("\"version\": 1"));
-        assert!(rendered.contains("\n  \"projects\": {"));
-        assert!(rendered.contains("\"last_accessed_at\": \"2026-04-15T12:00:00Z\""));
-        assert!(rendered.contains("\"last_seen_at\": \"2026-04-15T12:05:10Z\""));
-        assert!(rendered.contains("\"last_window_id\": \"window-1\""));
+            let rendered = fs::read_to_string(path).expect("state file should be readable");
+            assert!(rendered.contains("\"version\": 1"));
+            assert!(rendered.contains("\n  \"projects\": {"));
+            assert!(rendered.contains("\"last_accessed_at\": \"2026-04-15T12:00:00Z\""));
+            assert!(rendered.contains("\"last_seen_at\": \"2026-04-15T12:05:10Z\""));
+            assert!(rendered.contains("\"last_window_id\": \"window-1\""));
+        });
     }
 
     #[test]
@@ -647,12 +643,15 @@ mod tests {
 
     #[test]
     fn loading_old_project_shape_returns_state_error() {
-        let temp_dir = unique_test_dir();
-        let path = temp_dir.join("state.json");
-        fs::create_dir_all(&temp_dir).expect("temp dir should exist");
-        fs::write(
-            &path,
-            r#"{
+        with_test_store(|path, store| {
+            fs::create_dir_all(
+                path.parent()
+                    .expect("default state path should have a parent directory"),
+            )
+            .expect("temp dir should exist");
+            fs::write(
+                path,
+                r#"{
   "version": 1,
   "projects": {
     "/Users/example/src/project-a": {
@@ -661,13 +660,13 @@ mod tests {
   }
 }
 "#,
-        )
-        .expect("legacy state should be written");
-        let store = StateStore::from_path(path);
+            )
+            .expect("legacy state should be written");
 
-        let report = store.load().expect_err("legacy shape should fail");
+            let report = store.load().expect_err("legacy shape should fail");
 
-        assert!(format!("{report:?}").contains("Failed to parse state file"));
+            assert!(format!("{report:?}").contains("Failed to parse state file"));
+        });
     }
 
     #[test]
@@ -719,6 +718,53 @@ mod tests {
 
     fn parse_timestamp(input: &str) -> Timestamp {
         input.parse().expect("timestamp fixture should parse")
+    }
+
+    fn with_test_store(test: impl FnOnce(&Path, &StateStore)) {
+        let temp_dir = unique_test_dir();
+        let _home = HomeOverride::new(&temp_dir);
+        let store = StateStore::from_default_path().expect("default store path should resolve");
+        let path = store.path.clone();
+        test(&path, &store);
+    }
+
+    struct HomeOverride {
+        _guard: MutexGuard<'static, ()>,
+        original_home: Option<OsString>,
+    }
+
+    impl HomeOverride {
+        fn new(home: &Path) -> Self {
+            let guard = home_mutex()
+                .lock()
+                .expect("HOME mutex should not be poisoned");
+            let original_home = env::var_os("HOME");
+            unsafe {
+                env::set_var("HOME", home);
+            }
+            Self {
+                _guard: guard,
+                original_home,
+            }
+        }
+    }
+
+    impl Drop for HomeOverride {
+        fn drop(&mut self) {
+            match self.original_home.as_ref() {
+                Some(original_home) => unsafe {
+                    env::set_var("HOME", original_home);
+                },
+                None => unsafe {
+                    env::remove_var("HOME");
+                },
+            }
+        }
+    }
+
+    fn home_mutex() -> &'static Mutex<()> {
+        static HOME_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+        HOME_MUTEX.get_or_init(|| Mutex::new(()))
     }
 
     fn unique_test_dir() -> PathBuf {

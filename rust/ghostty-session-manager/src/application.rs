@@ -428,9 +428,12 @@ fn project_state_for_path(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::env;
+    use std::ffi::OsString;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use error_stack::Report;
@@ -834,237 +837,236 @@ mod tests {
 
     #[test]
     fn prepare_switch_uses_cached_state_without_live_query() {
-        let temp_dir = unique_test_dir();
-        let state_path = temp_dir.join("state.json");
-        let store = StateStore::from_path(&state_path);
-        let state = StateFile {
-            version: 1,
-            projects: BTreeMap::from([(
-                "/tmp/project-alpha".to_owned(),
-                ProjectStateRecord {
-                    last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
-                    last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
-                    last_window_id: "window-1".to_owned(),
-                    last_window_name: Some("Workspace".to_owned()),
-                },
-            )]),
-        };
-        store.save(&state).expect("state should save");
+        with_test_store(|_, store| {
+            let state = StateFile {
+                version: 1,
+                projects: BTreeMap::from([(
+                    "/tmp/project-alpha".to_owned(),
+                    ProjectStateRecord {
+                        last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                        last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                        last_window_id: "window-1".to_owned(),
+                        last_window_name: Some("Workspace".to_owned()),
+                    },
+                )]),
+            };
+            store.save(&state).expect("state should save");
 
-        let context = prepare_switch_with_inventory_loader(&store, None, || {
-            panic!("live Ghostty query should not run when cached state is populated")
-        })
-        .expect("cached switch context should build");
+            let context = prepare_switch_with_inventory_loader(&store, None, || {
+                panic!("live Ghostty query should not run when cached state is populated")
+            })
+            .expect("cached switch context should build");
 
-        assert!(!context.seeded_from_live);
-        assert_eq!(context.current_project_key, None);
-        assert_eq!(context.state, state);
-        assert_eq!(context.windows, switch_windows_from_state(&context.state));
+            assert!(!context.seeded_from_live);
+            assert_eq!(context.current_project_key, None);
+            assert_eq!(context.state, state);
+            assert_eq!(context.windows, switch_windows_from_state(&context.state));
+        });
     }
 
     #[test]
     fn prepare_switch_seeds_from_live_inventory_when_state_is_empty() {
-        let temp_dir = unique_test_dir();
-        let store = StateStore::from_path(temp_dir.join("state.json"));
-        let project_dir = temp_dir.join("project");
-        fs::create_dir_all(&project_dir).expect("project dir should exist");
+        with_test_store(|temp_dir, store| {
+            let project_dir = temp_dir.join("project");
+            fs::create_dir_all(&project_dir).expect("project dir should exist");
 
-        let inventory = WindowInventory::from_windows(vec![Window {
-            window_id: "window-1".to_owned(),
-            window_name: Some("Workspace".to_owned()),
-            project_path: Some(project_dir.clone()),
-            tabs: vec![Tab {
-                tab_id: "tab-1".to_owned(),
-                tab_name: Some("Editor".to_owned()),
-                index: 1,
-                terminals: vec![Terminal {
-                    terminal_id: "terminal-1".to_owned(),
-                    working_directory: Some(project_dir.clone()),
+            let inventory = WindowInventory::from_windows(vec![Window {
+                window_id: "window-1".to_owned(),
+                window_name: Some("Workspace".to_owned()),
+                project_path: Some(project_dir.clone()),
+                tabs: vec![Tab {
+                    tab_id: "tab-1".to_owned(),
+                    tab_name: Some("Editor".to_owned()),
+                    index: 1,
+                    terminals: vec![Terminal {
+                        terminal_id: "terminal-1".to_owned(),
+                        working_directory: Some(project_dir.clone()),
+                    }],
                 }],
-            }],
-        }]);
+            }]);
 
-        let context = prepare_switch_with_inventory_loader(&store, None, || Ok(inventory.clone()))
-            .expect("seeded switch context should build");
-        let persisted = store.load().expect("seeded state should load");
+            let context =
+                prepare_switch_with_inventory_loader(&store, None, || Ok(inventory.clone()))
+                    .expect("seeded switch context should build");
+            let persisted = store.load().expect("seeded state should load");
 
-        assert!(context.seeded_from_live);
-        assert_eq!(context.current_project_key, None);
-        assert_eq!(context.state, persisted);
-        assert_eq!(context.windows, switch_windows_from_state(&context.state));
-        assert_eq!(context.windows.len(), 1);
-        assert_eq!(
-            context.windows[0].project_path.as_deref(),
-            Some(
-                project_dir
-                    .canonicalize()
-                    .expect("project dir should canonicalize")
-                    .as_path()
-            )
-        );
+            assert!(context.seeded_from_live);
+            assert_eq!(context.current_project_key, None);
+            assert_eq!(context.state, persisted);
+            assert_eq!(context.windows, switch_windows_from_state(&context.state));
+            assert_eq!(context.windows.len(), 1);
+            assert_eq!(
+                context.windows[0].project_path.as_deref(),
+                Some(
+                    project_dir
+                        .canonicalize()
+                        .expect("project dir should canonicalize")
+                        .as_path()
+                )
+            );
+        });
     }
 
     #[test]
     fn prepare_switch_returns_no_windows_error_when_seeded_state_is_still_empty() {
-        let temp_dir = unique_test_dir();
-        let store = StateStore::from_path(temp_dir.join("state.json"));
+        with_test_store(|_, store| {
+            let report = prepare_switch_with_inventory_loader(&store, None, || {
+                Ok(WindowInventory::from_windows(vec![]))
+            })
+            .expect_err("empty seed should fail");
 
-        let report = prepare_switch_with_inventory_loader(&store, None, || {
-            Ok(WindowInventory::from_windows(vec![]))
-        })
-        .expect_err("empty seed should fail");
-
-        let rendered = format!("{report:?}");
-        assert!(rendered.contains("Ghostty returned no windows to switch to"));
+            let rendered = format!("{report:?}");
+            assert!(rendered.contains("Ghostty returned no windows to switch to"));
+        });
     }
 
     #[test]
     fn prepare_switch_resolves_current_project_key_for_exact_cwd_match() {
-        let temp_dir = unique_test_dir();
-        let store = StateStore::from_path(temp_dir.join("state.json"));
-        let project_dir = temp_dir.join("project");
-        fs::create_dir_all(&project_dir).expect("project dir should exist");
-        let project_key = project_dir
-            .canonicalize()
-            .expect("project dir should canonicalize")
-            .display()
-            .to_string();
-        let state = StateFile {
-            version: 1,
-            projects: BTreeMap::from([(
-                project_key.clone(),
-                ProjectStateRecord {
-                    last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
-                    last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
-                    last_window_id: "window-1".to_owned(),
-                    last_window_name: Some("Workspace".to_owned()),
-                },
-            )]),
-        };
-        store.save(&state).expect("state should save");
+        with_test_store(|temp_dir, store| {
+            let project_dir = temp_dir.join("project");
+            fs::create_dir_all(&project_dir).expect("project dir should exist");
+            let project_key = project_dir
+                .canonicalize()
+                .expect("project dir should canonicalize")
+                .display()
+                .to_string();
+            let state = StateFile {
+                version: 1,
+                projects: BTreeMap::from([(
+                    project_key.clone(),
+                    ProjectStateRecord {
+                        last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                        last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                        last_window_id: "window-1".to_owned(),
+                        last_window_name: Some("Workspace".to_owned()),
+                    },
+                )]),
+            };
+            store.save(&state).expect("state should save");
 
-        let context =
-            prepare_switch_with_inventory_loader(&store, Some(&project_dir), || unreachable!())
-                .expect("cached switch context should build");
+            let context =
+                prepare_switch_with_inventory_loader(&store, Some(&project_dir), || unreachable!())
+                    .expect("cached switch context should build");
 
-        assert_eq!(context.current_project_key, Some(project_key));
+            assert_eq!(context.current_project_key, Some(project_key));
+        });
     }
 
     #[test]
     fn prepare_switch_resolves_current_project_key_for_nested_cwd() {
-        let temp_dir = unique_test_dir();
-        let store = StateStore::from_path(temp_dir.join("state.json"));
-        let project_dir = temp_dir.join("project");
-        let nested_dir = project_dir.join("src/module");
-        fs::create_dir_all(&nested_dir).expect("nested dir should exist");
-        let project_key = project_dir
-            .canonicalize()
-            .expect("project dir should canonicalize")
-            .display()
-            .to_string();
-        let state = StateFile {
-            version: 1,
-            projects: BTreeMap::from([(
-                project_key.clone(),
-                ProjectStateRecord {
-                    last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
-                    last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
-                    last_window_id: "window-1".to_owned(),
-                    last_window_name: Some("Workspace".to_owned()),
-                },
-            )]),
-        };
-        store.save(&state).expect("state should save");
+        with_test_store(|temp_dir, store| {
+            let project_dir = temp_dir.join("project");
+            let nested_dir = project_dir.join("src/module");
+            fs::create_dir_all(&nested_dir).expect("nested dir should exist");
+            let project_key = project_dir
+                .canonicalize()
+                .expect("project dir should canonicalize")
+                .display()
+                .to_string();
+            let state = StateFile {
+                version: 1,
+                projects: BTreeMap::from([(
+                    project_key.clone(),
+                    ProjectStateRecord {
+                        last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                        last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                        last_window_id: "window-1".to_owned(),
+                        last_window_name: Some("Workspace".to_owned()),
+                    },
+                )]),
+            };
+            store.save(&state).expect("state should save");
 
-        let context =
-            prepare_switch_with_inventory_loader(&store, Some(&nested_dir), || unreachable!())
-                .expect("cached switch context should build");
+            let context =
+                prepare_switch_with_inventory_loader(&store, Some(&nested_dir), || unreachable!())
+                    .expect("cached switch context should build");
 
-        assert_eq!(context.current_project_key, Some(project_key));
+            assert_eq!(context.current_project_key, Some(project_key));
+        });
     }
 
     #[test]
     fn prepare_switch_uses_deepest_ancestor_as_current_project_key() {
-        let temp_dir = unique_test_dir();
-        let store = StateStore::from_path(temp_dir.join("state.json"));
-        let parent_dir = temp_dir.join("workspace");
-        let child_dir = parent_dir.join("project");
-        let nested_dir = child_dir.join("src/module");
-        fs::create_dir_all(&nested_dir).expect("nested dir should exist");
-        let parent_key = parent_dir
-            .canonicalize()
-            .expect("parent dir should canonicalize")
-            .display()
-            .to_string();
-        let child_key = child_dir
-            .canonicalize()
-            .expect("child dir should canonicalize")
-            .display()
-            .to_string();
-        let state = StateFile {
-            version: 1,
-            projects: BTreeMap::from([
-                (
-                    parent_key.clone(),
-                    ProjectStateRecord {
-                        last_accessed_at: parse_timestamp("2026-04-16T09:00:00Z"),
-                        last_seen_at: parse_timestamp("2026-04-16T09:05:00Z"),
-                        last_window_id: "window-parent".to_owned(),
-                        last_window_name: Some("Parent".to_owned()),
-                    },
-                ),
-                (
-                    child_key.clone(),
-                    ProjectStateRecord {
-                        last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
-                        last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
-                        last_window_id: "window-child".to_owned(),
-                        last_window_name: Some("Child".to_owned()),
-                    },
-                ),
-            ]),
-        };
-        store.save(&state).expect("state should save");
+        with_test_store(|temp_dir, store| {
+            let parent_dir = temp_dir.join("workspace");
+            let child_dir = parent_dir.join("project");
+            let nested_dir = child_dir.join("src/module");
+            fs::create_dir_all(&nested_dir).expect("nested dir should exist");
+            let parent_key = parent_dir
+                .canonicalize()
+                .expect("parent dir should canonicalize")
+                .display()
+                .to_string();
+            let child_key = child_dir
+                .canonicalize()
+                .expect("child dir should canonicalize")
+                .display()
+                .to_string();
+            let state = StateFile {
+                version: 1,
+                projects: BTreeMap::from([
+                    (
+                        parent_key.clone(),
+                        ProjectStateRecord {
+                            last_accessed_at: parse_timestamp("2026-04-16T09:00:00Z"),
+                            last_seen_at: parse_timestamp("2026-04-16T09:05:00Z"),
+                            last_window_id: "window-parent".to_owned(),
+                            last_window_name: Some("Parent".to_owned()),
+                        },
+                    ),
+                    (
+                        child_key.clone(),
+                        ProjectStateRecord {
+                            last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                            last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                            last_window_id: "window-child".to_owned(),
+                            last_window_name: Some("Child".to_owned()),
+                        },
+                    ),
+                ]),
+            };
+            store.save(&state).expect("state should save");
 
-        let context =
-            prepare_switch_with_inventory_loader(&store, Some(&nested_dir), || unreachable!())
-                .expect("cached switch context should build");
+            let context =
+                prepare_switch_with_inventory_loader(&store, Some(&nested_dir), || unreachable!())
+                    .expect("cached switch context should build");
 
-        assert_eq!(context.current_project_key, Some(child_key));
+            assert_eq!(context.current_project_key, Some(child_key));
+        });
     }
 
     #[test]
     fn prepare_switch_leaves_current_project_key_empty_when_cwd_is_unrelated() {
-        let temp_dir = unique_test_dir();
-        let store = StateStore::from_path(temp_dir.join("state.json"));
-        let project_dir = temp_dir.join("project");
-        let other_dir = temp_dir.join("other");
-        fs::create_dir_all(&project_dir).expect("project dir should exist");
-        fs::create_dir_all(&other_dir).expect("other dir should exist");
-        let project_key = project_dir
-            .canonicalize()
-            .expect("project dir should canonicalize")
-            .display()
-            .to_string();
-        let state = StateFile {
-            version: 1,
-            projects: BTreeMap::from([(
-                project_key,
-                ProjectStateRecord {
-                    last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
-                    last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
-                    last_window_id: "window-1".to_owned(),
-                    last_window_name: Some("Workspace".to_owned()),
-                },
-            )]),
-        };
-        store.save(&state).expect("state should save");
+        with_test_store(|temp_dir, store| {
+            let project_dir = temp_dir.join("project");
+            let other_dir = temp_dir.join("other");
+            fs::create_dir_all(&project_dir).expect("project dir should exist");
+            fs::create_dir_all(&other_dir).expect("other dir should exist");
+            let project_key = project_dir
+                .canonicalize()
+                .expect("project dir should canonicalize")
+                .display()
+                .to_string();
+            let state = StateFile {
+                version: 1,
+                projects: BTreeMap::from([(
+                    project_key,
+                    ProjectStateRecord {
+                        last_accessed_at: parse_timestamp("2026-04-16T10:00:00Z"),
+                        last_seen_at: parse_timestamp("2026-04-16T10:05:00Z"),
+                        last_window_id: "window-1".to_owned(),
+                        last_window_name: Some("Workspace".to_owned()),
+                    },
+                )]),
+            };
+            store.save(&state).expect("state should save");
 
-        let context =
-            prepare_switch_with_inventory_loader(&store, Some(&other_dir), || unreachable!())
-                .expect("cached switch context should build");
+            let context =
+                prepare_switch_with_inventory_loader(&store, Some(&other_dir), || unreachable!())
+                    .expect("cached switch context should build");
 
-        assert_eq!(context.current_project_key, None);
+            assert_eq!(context.current_project_key, None);
+        });
     }
 
     #[test]
@@ -1435,6 +1437,52 @@ mod tests {
 
         let rendered = format!("{report:?}");
         assert!(rendered.contains("no matching live project window was found"));
+    }
+
+    fn with_test_store(test: impl FnOnce(&Path, &StateStore)) {
+        let temp_dir = unique_test_dir();
+        let _home = HomeOverride::new(&temp_dir);
+        let store = StateStore::from_default_path().expect("default store path should resolve");
+        test(&temp_dir, &store);
+    }
+
+    struct HomeOverride {
+        _guard: MutexGuard<'static, ()>,
+        original_home: Option<OsString>,
+    }
+
+    impl HomeOverride {
+        fn new(home: &Path) -> Self {
+            let guard = home_mutex()
+                .lock()
+                .expect("HOME mutex should not be poisoned");
+            let original_home = env::var_os("HOME");
+            unsafe {
+                env::set_var("HOME", home);
+            }
+            Self {
+                _guard: guard,
+                original_home,
+            }
+        }
+    }
+
+    impl Drop for HomeOverride {
+        fn drop(&mut self) {
+            match self.original_home.as_ref() {
+                Some(original_home) => unsafe {
+                    env::set_var("HOME", original_home);
+                },
+                None => unsafe {
+                    env::remove_var("HOME");
+                },
+            }
+        }
+    }
+
+    fn home_mutex() -> &'static Mutex<()> {
+        static HOME_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+        HOME_MUTEX.get_or_init(|| Mutex::new(()))
     }
 
     fn unique_test_dir() -> PathBuf {

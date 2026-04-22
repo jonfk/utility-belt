@@ -90,17 +90,6 @@ pub fn rank_projects(
         .collect()
 }
 
-pub fn rank_project_keys(
-    query: &str,
-    projects: &BTreeMap<String, ProjectStateRecord>,
-    current_project_key: Option<&str>,
-) -> Vec<String> {
-    rank_projects(query, projects, current_project_key)
-        .into_iter()
-        .map(|project_match| project_match.project_key)
-        .collect()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RankedProject {
     project_key: String,
@@ -248,7 +237,7 @@ mod tests {
 
     use jiff::Timestamp;
 
-    use super::{ProjectMatchField, rank_project_keys, rank_projects};
+    use super::{ProjectMatchField, rank_projects};
     use crate::state::ProjectStateRecord;
 
     #[test]
@@ -311,7 +300,7 @@ mod tests {
         ];
 
         for case in cases {
-            let actual = rank_project_keys(case.query, &projects, None);
+            let actual = ranked_keys(case.query, &projects, None);
             assert_eq!(actual, case.expected, "{}", case.name);
         }
     }
@@ -329,7 +318,7 @@ mod tests {
             ),
         ]);
 
-        let ranked = rank_project_keys("project", &projects, None);
+        let ranked = ranked_keys("project", &projects, None);
 
         assert_eq!(
             ranked,
@@ -353,7 +342,7 @@ mod tests {
             ),
         ]);
 
-        let ranked = rank_project_keys("project", &projects, None);
+        let ranked = ranked_keys("project", &projects, None);
 
         assert_eq!(
             ranked,
@@ -377,7 +366,7 @@ mod tests {
             ),
         ]);
 
-        let ranked = rank_project_keys("", &projects, Some("/work/apps/current"));
+        let ranked = ranked_keys("", &projects, Some("/work/apps/current"));
 
         assert_eq!(
             ranked,
@@ -401,7 +390,7 @@ mod tests {
             ),
         ]);
 
-        let ranked = rank_project_keys("project", &projects, Some("/work/apps/current/project"));
+        let ranked = ranked_keys("project", &projects, Some("/work/apps/current/project"));
 
         assert_eq!(
             ranked,
@@ -425,7 +414,7 @@ mod tests {
             ),
         ]);
 
-        let ranked = rank_project_keys("api", &projects, Some("/work/apps/current/api"));
+        let ranked = ranked_keys("api", &projects, Some("/work/apps/current/api"));
 
         assert_eq!(
             ranked,
@@ -453,7 +442,7 @@ mod tests {
             ),
         ]);
 
-        let ranked = rank_project_keys("project", &projects, Some("/work/apps/current/project"));
+        let ranked = ranked_keys("project", &projects, Some("/work/apps/current/project"));
 
         assert_eq!(
             ranked,
@@ -503,7 +492,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            rank_project_keys("api", &projects, None),
+            ranked_keys("api", &projects, None),
             vec![
                 "/Users/example/src/services/api".to_owned(),
                 "/Users/example/src/services/api-gateway".to_owned(),
@@ -511,14 +500,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            rank_project_keys("ghost", &projects, None),
+            ranked_keys("ghost", &projects, None),
             vec![
                 "/Users/example/src/platform/ghostty-session-manager".to_owned(),
                 "/Users/example/src/platform/ghostty-tools".to_owned(),
             ]
         );
         assert_eq!(
-            rank_project_keys("platform/ghostty", &projects, None),
+            ranked_keys("platform/ghostty", &projects, None),
             vec![
                 "/Users/example/src/platform/ghostty-session-manager".to_owned(),
                 "/Users/example/src/platform/ghostty-tools".to_owned(),
@@ -599,6 +588,17 @@ mod tests {
             .enumerate()
             .filter(|(char_index, _)| char_indices.contains(char_index))
             .map(|(_, character)| character)
+            .collect()
+    }
+
+    fn ranked_keys(
+        query: &str,
+        projects: &BTreeMap<String, ProjectStateRecord>,
+        current_project_key: Option<&str>,
+    ) -> Vec<String> {
+        rank_projects(query, projects, current_project_key)
+            .into_iter()
+            .map(|project_match| project_match.project_key)
             .collect()
     }
 
