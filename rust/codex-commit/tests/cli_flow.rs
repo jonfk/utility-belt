@@ -203,7 +203,8 @@ fn installed_schema_path_is_passed_to_codex_exec() {
     let captured_prompt =
         fs::read_to_string(harness.prompt_capture_path()).expect("prompt capture");
     assert!(captured_prompt.contains("# Git Commit Proposal"));
-    assert!(captured_prompt.contains("Run `git status --short`."));
+    assert!(captured_prompt.contains("Run `git status --short --branch`"));
+    assert!(captured_prompt.contains("package-lock.json"));
     assert!(!captured_prompt.contains("name: git-commit-proposal"));
     assert!(!captured_prompt.contains("\n---\n"));
 }
