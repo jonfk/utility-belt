@@ -317,6 +317,7 @@ pub fn run_picker(
         return Err(Report::new(AppError::Tui).attach("Cannot open picker with no entries"));
     }
 
+    let mut cleanup = TerminalCleanup::new();
     let mut terminal = {
         let _command_enter = command_span.enter();
         let _run_enter = run_span.enter();
@@ -326,18 +327,19 @@ pub fn run_picker(
         enable_raw_mode()
             .change_context(AppError::Tui)
             .attach("Failed to enable terminal raw mode for switch picker")?;
+        cleanup.mark_raw_mode_enabled();
 
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, cursor::Hide)
             .change_context(AppError::Tui)
             .attach("Failed to enter alternate screen for switch picker")?;
+        cleanup.mark_alternate_screen_enabled();
 
         let backend = CrosstermBackend::new(stdout);
         Terminal::new(backend)
             .change_context(AppError::Tui)
             .attach("Failed to initialize terminal backend for switch picker")?
     };
-    let _cleanup = TerminalCleanup;
 
     let mut state = PickerState::new(entries, projects, current_project_key);
     if refresh_receiver.is_some() {
@@ -402,13 +404,72 @@ pub fn run_picker(
     }
 }
 
-struct TerminalCleanup;
+struct TerminalCleanup {
+    raw_mode_enabled: bool,
+    alternate_screen_enabled: bool,
+    cleanup_fns: TerminalCleanupFns,
+}
+
+#[derive(Clone, Copy)]
+struct TerminalCleanupFns {
+    disable_raw_mode: fn(),
+    leave_alternate_screen: fn(),
+}
+
+impl TerminalCleanup {
+    fn new() -> Self {
+        Self {
+            raw_mode_enabled: false,
+            alternate_screen_enabled: false,
+            cleanup_fns: TerminalCleanupFns::default(),
+        }
+    }
+
+    fn mark_raw_mode_enabled(&mut self) {
+        self.raw_mode_enabled = true;
+    }
+
+    fn mark_alternate_screen_enabled(&mut self) {
+        self.alternate_screen_enabled = true;
+    }
+
+    #[cfg(test)]
+    fn with_cleanup_fns(cleanup_fns: TerminalCleanupFns) -> Self {
+        Self {
+            raw_mode_enabled: false,
+            alternate_screen_enabled: false,
+            cleanup_fns,
+        }
+    }
+}
+
+impl Default for TerminalCleanupFns {
+    fn default() -> Self {
+        Self {
+            disable_raw_mode: cleanup_disable_raw_mode,
+            leave_alternate_screen: cleanup_leave_alternate_screen,
+        }
+    }
+}
+
+fn cleanup_disable_raw_mode() {
+    let _ = disable_raw_mode();
+}
+
+fn cleanup_leave_alternate_screen() {
+    let mut stdout = io::stdout();
+    let _ = execute!(stdout, LeaveAlternateScreen, cursor::Show);
+}
 
 impl Drop for TerminalCleanup {
     fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let mut stdout = io::stdout();
-        let _ = execute!(stdout, LeaveAlternateScreen, cursor::Show);
+        if self.alternate_screen_enabled {
+            (self.cleanup_fns.leave_alternate_screen)();
+        }
+
+        if self.raw_mode_enabled {
+            (self.cleanup_fns.disable_raw_mode)();
+        }
     }
 }
 
@@ -748,6 +809,7 @@ fn is_printable_query_char(character: char, modifiers: KeyModifiers) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::BTreeMap;
 
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -755,9 +817,15 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 
     use super::{
-        PickerEntry, PickerOutcome, PickerState, SELECTED_ROW_BG, handle_key_event, render_picker,
+        PickerEntry, PickerOutcome, PickerState, SELECTED_ROW_BG, TerminalCleanup,
+        TerminalCleanupFns, handle_key_event, render_picker,
     };
     use crate::state::ProjectStateRecord;
+
+    thread_local! {
+        static RAW_MODE_CLEANUPS: Cell<usize> = const { Cell::new(0) };
+        static SCREEN_CLEANUPS: Cell<usize> = const { Cell::new(0) };
+    }
 
     #[test]
     fn first_row_is_selected_initially() {
@@ -1268,6 +1336,38 @@ mod tests {
         assert_eq!(selected_cell.bg, SELECTED_ROW_BG);
     }
 
+    #[test]
+    fn terminal_cleanup_without_side_effects_is_noop() {
+        reset_cleanup_counters();
+
+        drop(TerminalCleanup::with_cleanup_fns(test_cleanup_fns()));
+
+        assert_eq!(cleanup_counts(), (0, 0));
+    }
+
+    #[test]
+    fn terminal_cleanup_after_raw_mode_only_cleans_up_raw_mode() {
+        reset_cleanup_counters();
+
+        let mut cleanup = TerminalCleanup::with_cleanup_fns(test_cleanup_fns());
+        cleanup.mark_raw_mode_enabled();
+        drop(cleanup);
+
+        assert_eq!(cleanup_counts(), (1, 0));
+    }
+
+    #[test]
+    fn terminal_cleanup_after_entering_alternate_screen_cleans_up_both_steps() {
+        reset_cleanup_counters();
+
+        let mut cleanup = TerminalCleanup::with_cleanup_fns(test_cleanup_fns());
+        cleanup.mark_raw_mode_enabled();
+        cleanup.mark_alternate_screen_enabled();
+        drop(cleanup);
+
+        assert_eq!(cleanup_counts(), (1, 1));
+    }
+
     fn filtered_project_keys(state: &PickerState) -> Vec<&str> {
         state
             .filtered_projects
@@ -1393,5 +1493,31 @@ mod tests {
 
     fn parse_timestamp(input: &str) -> Timestamp {
         input.parse().expect("timestamp fixture should parse")
+    }
+
+    fn test_cleanup_fns() -> TerminalCleanupFns {
+        TerminalCleanupFns {
+            disable_raw_mode: record_disable_raw_mode,
+            leave_alternate_screen: record_leave_alternate_screen,
+        }
+    }
+
+    fn record_disable_raw_mode() {
+        RAW_MODE_CLEANUPS.with(|count| count.set(count.get() + 1));
+    }
+
+    fn record_leave_alternate_screen() {
+        SCREEN_CLEANUPS.with(|count| count.set(count.get() + 1));
+    }
+
+    fn reset_cleanup_counters() {
+        RAW_MODE_CLEANUPS.with(|count| count.set(0));
+        SCREEN_CLEANUPS.with(|count| count.set(0));
+    }
+
+    fn cleanup_counts() -> (usize, usize) {
+        let raw_mode_count = RAW_MODE_CLEANUPS.with(Cell::get);
+        let screen_count = SCREEN_CLEANUPS.with(Cell::get);
+        (raw_mode_count, screen_count)
     }
 }
