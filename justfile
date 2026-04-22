@@ -57,6 +57,13 @@ install-codex-notify:
     cp -f $(pwd)/python/codex-notify/* ~/.local/share/codex-notify/
     ln -sf $(pwd)/python/codex-notify.py ~/.local/bin/codex-notify
 
+# Install codex-commit using cargo and install runtime assets
+install-codex-commit:
+    cargo install --path rust/codex-commit --locked --force
+    mkdir -p ~/.local/share/codex-commit
+    cp -f $(pwd)/rust/codex-commit/assets/SKILL.md ~/.local/share/codex-commit/SKILL.md
+    cp -f $(pwd)/rust/codex-commit/assets/commit-proposal.schema.json ~/.local/share/codex-commit/commit-proposal.schema.json
+
 # Install yt-transcript script
 install-yt-transcript:
     mkdir -p ~/.local/bin
