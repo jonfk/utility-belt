@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# See https://developers.openai.com/codex/config-advanced#notifications
+
 import json
 import os
 import subprocess
@@ -90,7 +92,7 @@ def play_sound(sound_path: Path) -> int:
 
 def main() -> int:
     notification = read_notification()
-    if notification.get("type") not in {"", "agent-turn-complete"}:
+    if notification.get("type") != "agent-turn-complete":
         return 0
 
     parent_command = read_parent_command()
