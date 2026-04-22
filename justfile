@@ -61,6 +61,13 @@ install-codex-notify:
 install-ghostty-session-manager:
     cargo install --path rust/ghostty-session-manager --locked --force
 
+# Install codex-commit using cargo and install runtime assets
+install-codex-commit:
+    cargo install --path rust/codex-commit --locked --force
+    mkdir -p ~/.local/share/codex-commit
+    cp -f $(pwd)/rust/codex-commit/assets/SKILL.md ~/.local/share/codex-commit/SKILL.md
+    cp -f $(pwd)/rust/codex-commit/assets/commit-proposal.schema.json ~/.local/share/codex-commit/commit-proposal.schema.json
+
 # Install yt-transcript script
 install-yt-transcript:
     mkdir -p ~/.local/bin
