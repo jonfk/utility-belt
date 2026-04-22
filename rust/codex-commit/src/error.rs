@@ -22,4 +22,7 @@ pub enum AppError {
 
     #[error("User interaction failed")]
     Interaction,
+
+    #[error("Terminal UI failed")]
+    Ui,
 }

@@ -15,6 +15,8 @@ use crate::git;
 use crate::message;
 use crate::prompt;
 use crate::proposal::{Proposal, ProposalAlternative, ProposalStatus};
+use crate::ui;
+use crate::ui::{ReviewAction, review_ready_tui, should_use_tui};
 
 pub fn run(cli: Cli) -> AppResult<()> {
     let repo_root = git::repo_root()?;
@@ -68,9 +70,22 @@ pub fn run(cli: Cli) -> AppResult<()> {
         )));
     }
 
+    let mut prefer_tui = should_use_tui();
     loop {
-        print_proposal(&proposal, &message_file)?;
-        match prompt_for_action()? {
+        let action: PromptAction = if prefer_tui {
+            match review_ready_tui(&proposal, &message_file) {
+                Ok(action) => action.into(),
+                Err(_) => {
+                    prefer_tui = false;
+                    eprintln!("codex-commit: terminal UI unavailable; falling back to plain text");
+                    review_ready_plain_text(&proposal, &message_file)?
+                }
+            }
+        } else {
+            review_ready_plain_text(&proposal, &message_file)?
+        };
+
+        match action {
             PromptAction::Commit => {
                 if current_staged.is_empty() {
                     git::add_paths(&repo_root, &proposal.stage_paths)?;
@@ -81,11 +96,23 @@ pub fn run(cli: Cli) -> AppResult<()> {
             PromptAction::Edit => {
                 open_editor(&repo_root, &message_file)?;
             }
+            PromptAction::Cancel => {
+                return Ok(());
+            }
+            PromptAction::Interrupt => {
+                ui::restore_terminal_if_active();
+                std::process::exit(130);
+            }
             PromptAction::Retry => {
                 println!("Press Enter or y to commit, n to edit, or Ctrl+C to cancel.");
             }
         }
     }
+}
+
+fn review_ready_plain_text(proposal: &Proposal, message_file: &Path) -> AppResult<PromptAction> {
+    print_proposal(proposal, message_file)?;
+    prompt_for_action()
 }
 
 fn print_proposal(proposal: &Proposal, message_file: &Path) -> AppResult<()> {
@@ -200,6 +227,7 @@ fn install_ctrlc_cleanup(tempdir_path: PathBuf) -> AppResult<()> {
     let handler_cleaned = Arc::clone(&cleaned);
 
     ctrlc::set_handler(move || {
+        ui::restore_terminal_if_active();
         if let Ok(mut already_cleaned) = handler_cleaned.lock() {
             if !*already_cleaned {
                 let _ = fs::remove_dir_all(&handler_path);
@@ -223,8 +251,21 @@ fn format_path_list(paths: &[String]) -> String {
         .join("\n")
 }
 
+impl From<ReviewAction> for PromptAction {
+    fn from(value: ReviewAction) -> Self {
+        match value {
+            ReviewAction::Commit => Self::Commit,
+            ReviewAction::Edit => Self::Edit,
+            ReviewAction::Cancel => Self::Cancel,
+            ReviewAction::Interrupt => Self::Interrupt,
+        }
+    }
+}
+
 enum PromptAction {
     Commit,
     Edit,
+    Cancel,
+    Interrupt,
     Retry,
 }

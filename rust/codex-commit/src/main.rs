@@ -7,6 +7,7 @@ mod git;
 mod message;
 mod prompt;
 mod proposal;
+mod ui;
 
 use clap::Parser;
 

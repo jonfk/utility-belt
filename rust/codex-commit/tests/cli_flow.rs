@@ -1,8 +1,11 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, Output, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use tempfile::tempdir;
 
@@ -198,6 +201,138 @@ fn installed_schema_path_is_passed_to_codex_exec() {
     );
 }
 
+#[test]
+fn pseudo_tty_run_falls_back_to_plain_text_and_still_commits() {
+    let harness = TestHarness::new().expect("harness");
+    harness.commit_initial_state().expect("initial commit");
+    harness.write_file("tty.txt", "tty\n").expect("file");
+
+    harness.set_stub_proposal(
+        r#"{"status":"ready","summary":"Ready to commit with the inline UI.","stage_paths":["tty.txt"],"commit":{"subject":"feat: commit from tui","body_paragraphs":["Rendered through ratatui."]},"alternatives":[]}"#,
+    );
+
+    let output = harness.run_tty("y\n", Some("Commit with this message? [Y/n] "), false, &[]);
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("codex-commit: terminal UI unavailable; falling back to plain text"));
+    assert!(stdout.contains("Commit with this message? [Y/n]"));
+
+    let subject = harness.git(["log", "-1", "--pretty=%s"]).expect("git log");
+    assert_eq!(subject.trim(), "feat: commit from tui");
+}
+
+#[test]
+fn codex_output_is_streamed_before_codex_commit_finishes() {
+    let harness = TestHarness::new().expect("harness");
+    harness.commit_initial_state().expect("initial commit");
+    harness.write_file("stream.txt", "stream\n").expect("file");
+
+    harness.set_stub_proposal(
+        r#"{"status":"ready","summary":"Ready to commit streamed output.","stage_paths":["stream.txt"],"commit":{"subject":"feat: stream codex output","body_paragraphs":[]},"alternatives":[]}"#,
+    );
+
+    let mut running = harness.spawn(
+        ["y\n"],
+        &[
+            ("STUB_CODEX_STREAM_MODE", "1"),
+            ("STUB_CODEX_STREAM_DELAY", "0.5"),
+        ],
+    );
+
+    let mut saw_progress = false;
+    for _ in 0..20 {
+        let output_so_far = running.combined_string();
+        if output_so_far.contains("codex stub: progress 1") {
+            saw_progress = true;
+            assert!(!output_so_far.contains("Commit with this message? [Y/n]"));
+            assert!(running.child.try_wait().expect("try_wait").is_none());
+            break;
+        }
+
+        if running.child.try_wait().expect("try_wait").is_some() {
+            break;
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    assert!(
+        saw_progress,
+        "expected live codex output before process completed"
+    );
+
+    let output = running.wait();
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn ctrl_d_from_tui_cancels_without_creating_a_commit() {
+    let harness = TestHarness::new().expect("harness");
+    harness.commit_initial_state().expect("initial commit");
+    harness.write_file("cancel.txt", "cancel\n").expect("file");
+
+    harness.set_stub_proposal(
+        r#"{"status":"ready","summary":"Ready to cancel from the inline UI.","stage_paths":["cancel.txt"],"commit":{"subject":"feat: should not commit","body_paragraphs":[]},"alternatives":[]}"#,
+    );
+
+    let output = harness.run_tty(
+        "\x04",
+        None,
+        true,
+        &[
+            ("STUB_CODEX_STREAM_MODE", "1"),
+            ("STUB_CODEX_STREAM_DELAY", "0.1"),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let head_subject = harness.git(["log", "-1", "--pretty=%s"]).expect("git log");
+    assert_eq!(head_subject.trim(), "chore: initial commit");
+}
+
+#[test]
+fn ctrl_c_from_tui_exits_with_code_130() {
+    let harness = TestHarness::new().expect("harness");
+    harness.commit_initial_state().expect("initial commit");
+    harness
+        .write_file("interrupt.txt", "interrupt\n")
+        .expect("file");
+
+    harness.set_stub_proposal(
+        r#"{"status":"ready","summary":"Ready to interrupt from the inline UI.","stage_paths":["interrupt.txt"],"commit":{"subject":"feat: should not commit","body_paragraphs":[]},"alternatives":[]}"#,
+    );
+
+    let output = harness.run_tty(
+        "\x03",
+        None,
+        true,
+        &[
+            ("STUB_CODEX_STREAM_MODE", "1"),
+            ("STUB_CODEX_STREAM_DELAY", "0.1"),
+        ],
+    );
+    assert_eq!(output.status.code(), Some(130));
+
+    let head_subject = harness.git(["log", "-1", "--pretty=%s"]).expect("git log");
+    assert_eq!(head_subject.trim(), "chore: initial commit");
+}
+
 struct TestHarness {
     root: tempfile::TempDir,
     repo_dir: PathBuf,
@@ -269,26 +404,16 @@ impl TestHarness {
         stdin_chunks: impl IntoIterator<Item = &'a str>,
         extra_env: &[(&str, &str)],
     ) -> Output {
-        let mut command = Command::new(BINARY_PATH);
-        command.current_dir(&self.repo_dir);
-        command.env("HOME", &self.home_dir);
-        command.env(
-            "PATH",
-            format!(
-                "{}:{}",
-                self.stub_dir.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        );
-        command.env("STUB_PROPOSAL_FILE", self.stub_proposal_path());
-        command.env("STUB_SCHEMA_CAPTURE", self.schema_capture_path());
-        command.env("GIT_AUTHOR_NAME", "Test User");
-        command.env("GIT_AUTHOR_EMAIL", "test@example.com");
-        command.env("GIT_COMMITTER_NAME", "Test User");
-        command.env("GIT_COMMITTER_EMAIL", "test@example.com");
-        for (key, value) in extra_env {
-            command.env(key, value);
-        }
+        let child = self.spawn(stdin_chunks, extra_env);
+        child.wait()
+    }
+
+    fn spawn<'a>(
+        &self,
+        stdin_chunks: impl IntoIterator<Item = &'a str>,
+        extra_env: &[(&str, &str)],
+    ) -> RunningCommand {
+        let mut command = self.base_command(BINARY_PATH, extra_env);
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
@@ -299,7 +424,88 @@ impl TestHarness {
                 stdin.write_all(chunk.as_bytes()).expect("write stdin");
             }
         }
-        child.wait_with_output().expect("wait output")
+
+        let stdout = child.stdout.take().expect("stdout pipe");
+        let stderr = child.stderr.take().expect("stderr pipe");
+        RunningCommand::new(child, stdout, stderr)
+    }
+
+    fn run_tty(
+        &self,
+        input: &str,
+        wait_for: Option<&str>,
+        respond_to_cursor_query: bool,
+        extra_env: &[(&str, &str)],
+    ) -> Output {
+        let python = r#"import os, pty, select, signal, sys, time
+cmd = sys.argv[1:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe(cmd[0], cmd, os.environ)
+payload = os.environ.get("PTY_INPUT", "").encode()
+trigger = os.environ.get("PTY_INPUT_TRIGGER", "")
+reply_cursor = os.environ.get("PTY_REPLY_CURSOR", "") == "1"
+captured = bytearray()
+sent_input = False
+cursor_replied_at = None
+start = time.time()
+deadline = start + 10
+exit_code = 1
+while True:
+    if payload and not sent_input and time.time() - start >= 0.25:
+        if trigger and trigger not in captured.decode(errors="ignore"):
+            pass
+        elif reply_cursor and cursor_replied_at is None:
+            pass
+        elif reply_cursor and time.time() - cursor_replied_at < 0.25:
+            pass
+        else:
+            os.write(fd, payload)
+            sent_input = True
+    try:
+        ready, _, _ = select.select([fd], [], [], 0.1)
+        if ready:
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            captured.extend(chunk)
+            if reply_cursor and b'\x1b[6n' in chunk:
+                os.write(fd, b'\x1b[1;1R')
+                cursor_replied_at = time.time()
+    except OSError:
+        break
+    waited_pid, status = os.waitpid(pid, os.WNOHANG)
+    if waited_pid == pid:
+        exit_code = os.waitstatus_to_exitcode(status)
+        break
+    if time.time() >= deadline:
+        os.kill(pid, signal.SIGTERM)
+        _, status = os.waitpid(pid, 0)
+        exit_code = os.waitstatus_to_exitcode(status)
+        sys.stderr.write("PTY timeout while waiting for codex-commit\n")
+        break
+sys.stdout.buffer.write(captured)
+try:
+    _, status = os.waitpid(pid, 0)
+    exit_code = os.waitstatus_to_exitcode(status)
+except ChildProcessError:
+    pass
+sys.exit(exit_code)
+"#;
+
+        let mut command = self.base_command("python3", extra_env);
+        command.arg("-c").arg(python).arg(BINARY_PATH);
+        command.env("PTY_INPUT", input);
+        if let Some(marker) = wait_for {
+            command.env("PTY_INPUT_TRIGGER", marker);
+        }
+        if respond_to_cursor_query {
+            command.env("PTY_REPLY_CURSOR", "1");
+        }
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+
+        command.output().expect("run in pty")
     }
 
     fn git<const N: usize>(&self, args: [&str; N]) -> Result<String, Box<dyn std::error::Error>> {
@@ -365,6 +571,12 @@ if [ ! -f "$schema" ]; then
   echo "schema not found: $schema" >&2
   exit 7
 fi
+if [ "${STUB_CODEX_STREAM_MODE:-}" = "1" ]; then
+  echo "codex stub: progress 1"
+  sleep "${STUB_CODEX_STREAM_DELAY:-0.2}"
+  echo "codex stub: progress 2" >&2
+  sleep "${STUB_CODEX_STREAM_DELAY:-0.2}"
+fi
 cp "$STUB_PROPOSAL_FILE" "$output"
 printf '%s\n' "$schema" > "$STUB_SCHEMA_CAPTURE"
 printf '%s\n' "$prompt" > "${STUB_SCHEMA_CAPTURE}.prompt"
@@ -372,6 +584,30 @@ echo "codex stub ran"
 "#,
         )?;
         Ok(())
+    }
+
+    fn base_command(&self, program: &str, extra_env: &[(&str, &str)]) -> Command {
+        let mut command = Command::new(program);
+        command.current_dir(&self.repo_dir);
+        command.env("HOME", &self.home_dir);
+        command.env(
+            "PATH",
+            format!(
+                "{}:{}",
+                self.stub_dir.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        );
+        command.env("STUB_PROPOSAL_FILE", self.stub_proposal_path());
+        command.env("STUB_SCHEMA_CAPTURE", self.schema_capture_path());
+        command.env("GIT_AUTHOR_NAME", "Test User");
+        command.env("GIT_AUTHOR_EMAIL", "test@example.com");
+        command.env("GIT_COMMITTER_NAME", "Test User");
+        command.env("GIT_COMMITTER_EMAIL", "test@example.com");
+        for (key, value) in extra_env {
+            command.env(key, value);
+        }
+        command
     }
 
     fn stub_proposal_path(&self) -> PathBuf {
@@ -389,4 +625,73 @@ fn write_executable(path: &Path, contents: &str) -> Result<(), Box<dyn std::erro
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions)?;
     Ok(())
+}
+
+struct RunningCommand {
+    child: Child,
+    stdout: Arc<Mutex<Vec<u8>>>,
+    stderr: Arc<Mutex<Vec<u8>>>,
+    stdout_handle: JoinHandle<()>,
+    stderr_handle: JoinHandle<()>,
+}
+
+impl RunningCommand {
+    fn new(child: Child, stdout: ChildStdout, stderr: ChildStderr) -> Self {
+        let stdout_buffer = Arc::new(Mutex::new(Vec::new()));
+        let stderr_buffer = Arc::new(Mutex::new(Vec::new()));
+
+        let stdout_handle = spawn_reader(stdout, Arc::clone(&stdout_buffer));
+        let stderr_handle = spawn_reader(stderr, Arc::clone(&stderr_buffer));
+
+        Self {
+            child,
+            stdout: stdout_buffer,
+            stderr: stderr_buffer,
+            stdout_handle,
+            stderr_handle,
+        }
+    }
+
+    fn stdout_string(&self) -> String {
+        String::from_utf8_lossy(&self.stdout.lock().expect("stdout lock")).to_string()
+    }
+
+    fn combined_string(&self) -> String {
+        format!(
+            "{}{}",
+            self.stdout_string(),
+            String::from_utf8_lossy(&self.stderr.lock().expect("stderr lock"))
+        )
+    }
+
+    fn wait(mut self) -> Output {
+        let status = self.child.wait().expect("wait child");
+        self.stdout_handle.join().expect("join stdout");
+        self.stderr_handle.join().expect("join stderr");
+
+        Output {
+            status,
+            stdout: self.stdout.lock().expect("stdout lock").clone(),
+            stderr: self.stderr.lock().expect("stderr lock").clone(),
+        }
+    }
+}
+
+fn spawn_reader<R>(mut reader: R, target: Arc<Mutex<Vec<u8>>>) -> JoinHandle<()>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 4096];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(bytes_read) => target
+                    .lock()
+                    .expect("reader lock")
+                    .extend_from_slice(&buffer[..bytes_read]),
+                Err(_) => break,
+            }
+        }
+    })
 }
