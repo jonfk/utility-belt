@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -89,7 +89,11 @@ pub fn run(cli: Cli) -> AppResult<()> {
                 if current_staged.is_empty() {
                     git::add_paths(&repo_root, &proposal.stage_paths)?;
                 }
-                let created_commit = git::commit_with_message_file(&repo_root, &message_file)?;
+                let created_commit = git::commit_with_message_file(
+                    &repo_root,
+                    &message_file,
+                    std::io::stdout().is_terminal(),
+                )?;
                 println!();
                 println!("{}", created_commit.display);
                 return Ok(());

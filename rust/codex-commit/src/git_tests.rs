@@ -1,4 +1,4 @@
-use super::{sorted_paths, staged_sets_match};
+use super::{commit_summary_color_arg, sorted_paths, staged_sets_match};
 
 #[test]
 fn sorts_paths_for_stable_comparisons() {
@@ -21,4 +21,10 @@ fn staged_set_comparison_detects_mismatch() {
         &["src/main.rs".into()],
         &["README.md".into()]
     ));
+}
+
+#[test]
+fn commit_summary_color_follows_terminal_mode() {
+    assert_eq!(commit_summary_color_arg(true), "--color=always");
+    assert_eq!(commit_summary_color_arg(false), "--color=never");
 }

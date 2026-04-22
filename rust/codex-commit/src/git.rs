@@ -47,15 +47,27 @@ pub fn add_paths(repo_root: &Path, paths: &[String]) -> AppResult<()> {
     run_git_status(command, AppError::Git, "Failed to stage proposed files")
 }
 
-pub fn commit_with_message_file(repo_root: &Path, message_file: &Path) -> AppResult<CreatedCommit> {
+pub fn commit_with_message_file(
+    repo_root: &Path,
+    message_file: &Path,
+    color_output: bool,
+) -> AppResult<CreatedCommit> {
     let mut command = git_command(repo_root);
     command.arg("commit").arg("-F").arg(message_file);
     run_git_status(command, AppError::Git, "Failed to create git commit")?;
 
     let sha = stdout_text(&git_output(repo_root, ["rev-parse", "HEAD"])?);
+    let color_arg = commit_summary_color_arg(color_output);
     let display = stdout_text(&git_output(
         repo_root,
-        ["log", "-1", "--stat", "--format=fuller", sha.as_str()],
+        [
+            "log",
+            "-1",
+            "--stat",
+            "--format=fuller",
+            color_arg,
+            sha.as_str(),
+        ],
     )?);
 
     Ok(CreatedCommit { sha, display })
@@ -93,6 +105,14 @@ pub fn sorted_paths(paths: &[String]) -> Vec<String> {
 
 pub fn staged_sets_match(current_staged: &[String], proposed: &[String]) -> bool {
     sorted_paths(current_staged) == sorted_paths(proposed)
+}
+
+fn commit_summary_color_arg(color_output: bool) -> &'static str {
+    if color_output {
+        "--color=always"
+    } else {
+        "--color=never"
+    }
 }
 
 fn git_output<const N: usize>(repo_root: &Path, args: [&str; N]) -> AppResult<Output> {
