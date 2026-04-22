@@ -21,7 +21,6 @@ fn validates_existing_assets() {
     let assets = AssetPaths::from_home(home.path());
 
     fs::create_dir_all(&assets.base_dir).expect("asset dir");
-    fs::write(&assets.skill_path, "skill").expect("skill");
     fs::write(&assets.schema_path, "{}").expect("schema");
 
     assets.validate().expect("assets should validate");
@@ -36,6 +35,6 @@ fn missing_asset_error_reports_path() {
     let report = assets.validate().expect_err("validation should fail");
     let rendered = format!("{report:?}");
 
-    assert!(rendered.contains("Skill file not found"));
-    assert!(rendered.contains(&assets.skill_path.display().to_string()));
+    assert!(rendered.contains("Schema file not found"));
+    assert!(rendered.contains(&assets.schema_path.display().to_string()));
 }

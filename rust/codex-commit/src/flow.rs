@@ -21,10 +21,9 @@ use crate::ui::{ReviewAction, review_ready_tui, should_use_tui};
 pub fn run(cli: Cli) -> AppResult<()> {
     let repo_root = git::repo_root()?;
     let assets = AssetPaths::resolve()?;
-    let skill_text = assets.read_skill_text()?;
     codex::ensure_codex_available()?;
 
-    let prompt = prompt::build_prompt(&skill_text, &cli.extra_context());
+    let prompt = prompt::build_prompt(&cli.extra_context());
     let tempdir = tempdir()
         .change_context(AppError::Interaction)
         .attach("Failed to create temporary working directory")?;

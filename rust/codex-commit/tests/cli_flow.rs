@@ -199,6 +199,13 @@ fn installed_schema_path_is_passed_to_codex_exec() {
         captured_schema.trim(),
         expected_schema.display().to_string()
     );
+
+    let captured_prompt =
+        fs::read_to_string(harness.prompt_capture_path()).expect("prompt capture");
+    assert!(captured_prompt.contains("# Git Commit Proposal"));
+    assert!(captured_prompt.contains("Run `git status --short`."));
+    assert!(!captured_prompt.contains("name: git-commit-proposal"));
+    assert!(!captured_prompt.contains("\n---\n"));
 }
 
 #[test]
@@ -351,10 +358,6 @@ impl TestHarness {
         fs::create_dir_all(&stub_dir)?;
         fs::create_dir_all(home_dir.join(".local/share/codex-commit"))?;
 
-        fs::write(
-            home_dir.join(".local/share/codex-commit/SKILL.md"),
-            "skill body",
-        )?;
         fs::write(
             home_dir.join(".local/share/codex-commit/commit-proposal.schema.json"),
             r#"{"type":"object"}"#,
@@ -616,6 +619,10 @@ echo "codex stub ran"
 
     fn schema_capture_path(&self) -> PathBuf {
         self.root.path().join("schema-path.txt")
+    }
+
+    fn prompt_capture_path(&self) -> PathBuf {
+        self.root.path().join("schema-path.txt.prompt")
     }
 }
 

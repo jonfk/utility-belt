@@ -1,8 +1,3 @@
----
-name: git-commit-proposal
-description: Propose a commit as structured JSON without modifying git state. Use when a wrapper script wants Codex to inspect diffs and return a schema-validated commit plan for preview, optional editing, staging, and commit execution outside Codex.
----
-
 # Git Commit Proposal
 
 Return a structured commit proposal grounded in the actual repository state. Do not mutate git state.
@@ -32,7 +27,7 @@ Return a structured commit proposal grounded in the actual repository state. Do 
 - If changes should be split, return `status="split_required"` with concise alternative commit suggestions.
 - If there is no meaningful change to commit, return `status="nothing_to_commit"`.
 
-## Output requirements
+## Output Requirements
 - `summary` should explain why the proposal is ready or why it stopped.
 - Always include `stage_paths`, `commit`, and `alternatives` so the response matches the schema.
 - When `status="ready"`, `commit.subject` must be a Conventional Commit style subject and `commit.body_paragraphs` should contain only meaningful paragraphs. Use an empty array when no body is needed.
