@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 INSTALL_SOUND_DIR = Path.home() / ".local" / "share" / "codex-notify"
@@ -53,12 +54,25 @@ def read_parent_command() -> str:
     return result.stdout.strip()
 
 
-def select_sound(parent_command: str) -> Path:
+def select_sound_for_client(client: str) -> Optional[str]:
+    normalized = client.strip().lower()
+    if not normalized:
+        return None
+
+    if "codex" in normalized and "desktop" in normalized:
+        return APP_SOUND_NAME
+
+    if "codex" in normalized and "cli" in normalized:
+        return CLI_SOUND_NAME
+
+    return None
+
+
+def select_sound_for_parent_command(parent_command: str) -> Optional[str]:
     normalized = parent_command.lower()
-    sound_dir = resolve_sound_dir()
 
     if "/applications/codex.app/" in normalized:
-        return sound_dir / APP_SOUND_NAME
+        return APP_SOUND_NAME
 
     cli_markers = (
         "/node_modules/@openai/codex/",
@@ -68,9 +82,22 @@ def select_sound(parent_command: str) -> Path:
         "/bin/codex",
     )
     if any(marker in normalized for marker in cli_markers):
-        return sound_dir / CLI_SOUND_NAME
+        return CLI_SOUND_NAME
 
-    return sound_dir / FALLBACK_SOUND_NAME
+    return None
+
+
+def select_sound(notification: dict, parent_command: str) -> Path:
+    sound_dir = resolve_sound_dir()
+    client = notification.get("client", "")
+
+    sound_name = select_sound_for_client(client)
+    if sound_name is None:
+        sound_name = select_sound_for_parent_command(parent_command)
+    if sound_name is None:
+        sound_name = FALLBACK_SOUND_NAME
+
+    return sound_dir / sound_name
 
 
 def play_sound(sound_path: Path) -> int:
@@ -96,7 +123,7 @@ def main() -> int:
         return 0
 
     parent_command = read_parent_command()
-    sound_path = select_sound(parent_command)
+    sound_path = select_sound(notification, parent_command)
     return play_sound(sound_path)
 
 
