@@ -133,18 +133,11 @@ fn run_switch(
                 let _run_enter = run_span.enter();
                 let selection_span = info_span!(
                     "cli.resolve_selection",
+                    project_key = entry.project_key.as_str(),
                     window_id = entry.window_id.as_str()
                 );
                 let _selection_enter = selection_span.enter();
-                context
-                    .windows
-                    .iter()
-                    .find(|window| window.window_id == entry.window_id)
-                    .ok_or_else(|| {
-                        Report::new(AppError::Tui)
-                            .attach("Selected picker row no longer matches a Ghostty window")
-                    })?
-                    .clone()
+                resolve_selected_window(&entry, &context.windows)?
             };
 
             let _command_enter = command_span.enter();
@@ -185,11 +178,7 @@ fn write_stdout(rendered: &str) -> Result<(), Report<AppError>> {
 
 fn picker_entry_from_window(window: &SwitchWindow) -> PickerEntry {
     PickerEntry {
-        project_key: window
-            .project_path
-            .as_ref()
-            .map(|project_path| project_path.display().to_string())
-            .unwrap_or_else(|| window.window_id.clone()),
+        project_key: switch_window_project_key(window),
         window_id: window.window_id.clone(),
         primary_label: window.title.clone(),
         secondary_path: window
@@ -197,5 +186,92 @@ fn picker_entry_from_window(window: &SwitchWindow) -> PickerEntry {
             .as_ref()
             .map(|project_path| project_path.display().to_string()),
         window_name: window.window_name.clone(),
+    }
+}
+
+fn resolve_selected_window(
+    entry: &PickerEntry,
+    windows: &[SwitchWindow],
+) -> Result<SwitchWindow, Report<AppError>> {
+    windows
+        .iter()
+        .find(|window| {
+            window.window_id == entry.window_id
+                && switch_window_project_key(window) == entry.project_key
+        })
+        .cloned()
+        .ok_or_else(|| {
+            Report::new(AppError::Tui)
+                .attach("Selected picker row no longer matches a Ghostty window")
+                .attach(format!("selected_project_key={}", entry.project_key))
+                .attach(format!("selected_window_id={}", entry.window_id))
+        })
+}
+
+fn switch_window_project_key(window: &SwitchWindow) -> String {
+    window
+        .project_path
+        .as_ref()
+        .map(|project_path| project_path.display().to_string())
+        .unwrap_or_else(|| window.window_id.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{picker_entry_from_window, resolve_selected_window};
+    use crate::application::SwitchWindow;
+    use crate::tui::PickerEntry;
+
+    #[test]
+    fn resolve_selected_window_prefers_matching_project_key_when_window_ids_repeat() {
+        let windows = vec![
+            sample_window("/tmp/project-a", "window-1"),
+            sample_window("/tmp/project-b", "window-1"),
+        ];
+
+        let entry = picker_entry_from_window(&windows[1]);
+
+        let selected =
+            resolve_selected_window(&entry, &windows).expect("selection should resolve exactly");
+
+        assert_eq!(selected, windows[1]);
+    }
+
+    #[test]
+    fn resolve_selected_window_requires_matching_project_key_and_window_id() {
+        let windows = vec![
+            sample_window("/tmp/project-a", "window-1"),
+            sample_window("/tmp/project-b", "window-2"),
+        ];
+        let entry = PickerEntry {
+            project_key: "/tmp/project-a".to_owned(),
+            window_id: "window-2".to_owned(),
+            primary_label: "project-a".to_owned(),
+            secondary_path: Some("/tmp/project-a".to_owned()),
+            window_name: Some("Workspace".to_owned()),
+        };
+
+        let error = resolve_selected_window(&entry, &windows)
+            .expect_err("mismatched identity tuple should not resolve");
+        let rendered = format!("{error:?}");
+
+        assert!(rendered.contains("selected_project_key=/tmp/project-a"));
+        assert!(rendered.contains("selected_window_id=window-2"));
+    }
+
+    fn sample_window(project_key: &str, window_id: &str) -> SwitchWindow {
+        SwitchWindow {
+            window_id: window_id.to_owned(),
+            window_name: Some("Workspace".to_owned()),
+            project_path: Some(PathBuf::from(project_key)),
+            title: PathBuf::from(project_key)
+                .file_name()
+                .expect("sample project should have a basename")
+                .to_string_lossy()
+                .into_owned(),
+            detail: format!("{project_key} | Workspace | {window_id}"),
+        }
     }
 }
