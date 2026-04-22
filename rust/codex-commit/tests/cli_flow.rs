@@ -30,6 +30,9 @@ fn unstaged_ready_flow_stages_and_commits_expected_files() {
 
     let subject = harness.git(["log", "-1", "--pretty=%s"]).expect("git log");
     assert_eq!(subject.trim(), "feat: add src file");
+    let sha = harness.git(["rev-parse", "HEAD"]).expect("git rev-parse");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_commit_summary_output(&stdout, sha.trim(), "feat: add src file", "src.txt");
 
     let committed_files = harness
         .git(["show", "--pretty=", "--name-only", "HEAD"])
@@ -57,6 +60,14 @@ fn staged_ready_flow_commits_existing_staging_without_restaging() {
 
     let subject = harness.git(["log", "-1", "--pretty=%s"]).expect("git log");
     assert_eq!(subject.trim(), "feat: commit staged file");
+    let sha = harness.git(["rev-parse", "HEAD"]).expect("git rev-parse");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_commit_summary_output(
+        &stdout,
+        sha.trim(),
+        "feat: commit staged file",
+        "staged.txt",
+    );
 }
 
 #[test]
@@ -230,6 +241,8 @@ fn pseudo_tty_run_falls_back_to_plain_text_and_still_commits() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("codex-commit: terminal UI unavailable; falling back to plain text"));
     assert!(stdout.contains("Commit with this message? [Y/n]"));
+    let sha = harness.git(["rev-parse", "HEAD"]).expect("git rev-parse");
+    assert_commit_summary_output(&stdout, sha.trim(), "feat: commit from tui", "tty.txt");
 
     let subject = harness.git(["log", "-1", "--pretty=%s"]).expect("git log");
     assert_eq!(subject.trim(), "feat: commit from tui");
@@ -633,6 +646,15 @@ fn write_executable(path: &Path, contents: &str) -> Result<(), Box<dyn std::erro
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions)?;
     Ok(())
+}
+
+fn assert_commit_summary_output(stdout: &str, sha: &str, subject: &str, path: &str) {
+    assert!(
+        stdout.contains(&format!("commit {sha}")),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains(subject), "stdout: {stdout}");
+    assert!(stdout.contains(&format!("{path} |")), "stdout: {stdout}");
 }
 
 struct RunningCommand {

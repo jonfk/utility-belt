@@ -6,6 +6,12 @@ use error_stack::{Report, ResultExt};
 
 use crate::error::{AppError, AppResult};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedCommit {
+    pub sha: String,
+    pub display: String,
+}
+
 pub fn repo_root() -> AppResult<PathBuf> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -41,10 +47,18 @@ pub fn add_paths(repo_root: &Path, paths: &[String]) -> AppResult<()> {
     run_git_status(command, AppError::Git, "Failed to stage proposed files")
 }
 
-pub fn commit_with_message_file(repo_root: &Path, message_file: &Path) -> AppResult<()> {
+pub fn commit_with_message_file(repo_root: &Path, message_file: &Path) -> AppResult<CreatedCommit> {
     let mut command = git_command(repo_root);
     command.arg("commit").arg("-F").arg(message_file);
-    run_git_status(command, AppError::Git, "Failed to create git commit")
+    run_git_status(command, AppError::Git, "Failed to create git commit")?;
+
+    let sha = stdout_text(&git_output(repo_root, ["rev-parse", "HEAD"])?);
+    let display = stdout_text(&git_output(
+        repo_root,
+        ["log", "-1", "--stat", "--format=fuller", sha.as_str()],
+    )?);
+
+    Ok(CreatedCommit { sha, display })
 }
 
 pub fn resolve_editor(repo_root: &Path) -> String {

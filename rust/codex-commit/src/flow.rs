@@ -89,7 +89,9 @@ pub fn run(cli: Cli) -> AppResult<()> {
                 if current_staged.is_empty() {
                     git::add_paths(&repo_root, &proposal.stage_paths)?;
                 }
-                git::commit_with_message_file(&repo_root, &message_file)?;
+                let created_commit = git::commit_with_message_file(&repo_root, &message_file)?;
+                println!();
+                println!("{}", created_commit.display);
                 return Ok(());
             }
             PromptAction::Edit => {
