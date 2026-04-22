@@ -2,10 +2,6 @@
 default:
     @just --choose
 
-# Install git-smart-commit using uv
-install-git-smart-commit:
-    cd python/git-smart-commit && uv tool install --reinstall .
-
 # Install git-worktree-utils using uv
 install-git-worktree-utils:
     cd python/git-worktree-utils && uv tool install --reinstall .

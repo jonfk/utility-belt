@@ -14,6 +14,13 @@ app = typer.Typer(
 )
 
 
+def warn_deprecated() -> None:
+    print(
+        "git-smart-commit is deprecated and archived in utility-belt/deprecated.",
+        file=sys.stderr,
+    )
+
+
 def parse_args_with_separator(args: list[str]) -> tuple[list[str], list[str]]:
     """Split arguments on '--' separator.
 
@@ -121,5 +128,10 @@ def main(
     )
 
 
-if __name__ == "__main__":
+def entrypoint() -> None:
+    warn_deprecated()
     app()
+
+
+if __name__ == "__main__":
+    entrypoint()

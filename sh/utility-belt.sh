@@ -7,7 +7,6 @@ UTILITY_BELT_PROGRAMS=(
   codex-notify
   ghostty-session-manager
   git-smart-branch-delete
-  git-smart-commit
   git-smart-push
   git-worktree-utils
   organize-files-into-dirs-by-date
@@ -28,7 +27,8 @@ Usage:
   utility-belt activate zsh
 
 Notes:
-  - Only the programs supported by this script are shown/installed.
+  - Only active programs supported by this script are shown/installed.
+  - Deprecated programs are archived under deprecated/ and installed separately.
   - "run" only offers programs available in PATH.
 EOF
 }

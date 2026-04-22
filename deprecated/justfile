@@ -1,0 +1,3 @@
+# Install deprecated git-smart-commit using uv
+install-git-smart-commit:
+    cd python/git-smart-commit && uv tool install --reinstall .

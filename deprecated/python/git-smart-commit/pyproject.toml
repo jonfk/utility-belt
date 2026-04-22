@@ -11,4 +11,4 @@ dependencies = [
 ]
 
 [project.scripts]
-git-smart-commit = "git_smart_commit.cli:app"
+git-smart-commit = "git_smart_commit.cli:entrypoint"
