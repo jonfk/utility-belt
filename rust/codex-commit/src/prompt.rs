@@ -1,18 +1,28 @@
 const BASE_PROMPT_PREFIX: &str =
     "Follow these instructions exactly and return only a schema-compliant JSON response.\n\n";
 const COMMIT_PROPOSAL_PROMPT: &str = include_str!("../assets/commit-proposal-prompt.md");
+const USER_CONTEXT_PLACEHOLDER: &str = "{{USER_CONTEXT_BLOCK}}";
 
 pub fn build_prompt(extra_context: &str) -> String {
-    let mut prompt = String::from(BASE_PROMPT_PREFIX);
-    prompt.push_str(COMMIT_PROPOSAL_PROMPT.trim_end());
-
     let trimmed_context = extra_context.trim();
-    if !trimmed_context.is_empty() {
-        prompt.push_str("\n\nAdditional user context:\n");
-        prompt.push_str(trimmed_context);
+    let rendered_prompt = COMMIT_PROPOSAL_PROMPT.trim_end().replace(
+        USER_CONTEXT_PLACEHOLDER,
+        &render_user_context_block(trimmed_context),
+    );
+
+    let mut prompt = String::from(BASE_PROMPT_PREFIX);
+    prompt.push_str(rendered_prompt.trim_end());
+    prompt
+}
+
+fn render_user_context_block(extra_context: &str) -> String {
+    if extra_context.is_empty() {
+        return String::new();
     }
 
-    prompt
+    format!(
+        "## User-Provided Commit Context\n<<<USER_CONTEXT>>>\n{extra_context}\n<<<END_USER_CONTEXT>>>"
+    )
 }
 
 #[cfg(test)]
