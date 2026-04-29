@@ -37,6 +37,8 @@ pub fn run_codex(
         .arg("--ephemeral")
         .arg("--sandbox")
         .arg("read-only")
+        .arg("-m")
+        .arg("gpt-5.4-mini")
         .arg("-c")
         .arg("model_reasoning_effort=\"low\"")
         .arg("--output-schema")

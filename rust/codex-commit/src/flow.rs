@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use error_stack::{Report, ResultExt};
@@ -205,25 +205,35 @@ fn prompt_for_action() -> AppResult<PromptAction> {
 
 fn open_editor(repo_root: &Path, message_file: &Path) -> AppResult<()> {
     let editor = git::resolve_editor(repo_root);
+    run_editor_command(&editor, message_file)
+}
+
+fn run_editor_command(editor: &str, message_file: &Path) -> AppResult<()> {
     let command = format!("{} \"$1\"", editor);
 
-    let output = Command::new("sh")
+    let status = Command::new("sh")
         .arg("-c")
         .arg(command)
         .arg("codex-commit-editor")
         .arg(message_file)
-        .output()
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
         .change_context(AppError::Interaction)
         .attach(format!("Failed to launch editor `{editor}`"))?;
 
-    if output.status.success() {
+    if status.success() {
         return Ok(());
     }
 
-    Err(Report::new(AppError::Interaction).attach(format!(
-        "Editor `{editor}` failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    )))
+    let status_label = match status.code() {
+        Some(code) => format!("exit status {code}"),
+        None => "terminated by signal".to_string(),
+    };
+
+    Err(Report::new(AppError::Interaction)
+        .attach(format!("Editor `{editor}` failed with {status_label}")))
 }
 
 fn install_ctrlc_cleanup(tempdir_path: PathBuf) -> AppResult<()> {
@@ -273,4 +283,27 @@ enum PromptAction {
     Cancel,
     Interrupt,
     Retry,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::run_editor_command;
+
+    #[test]
+    fn run_editor_command_accepts_successful_exit() {
+        let result = run_editor_command("true", Path::new("/tmp/COMMIT_EDITMSG"));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn run_editor_command_reports_non_zero_exit_status() {
+        let report = run_editor_command("false", Path::new("/tmp/COMMIT_EDITMSG"))
+            .expect_err("expected failing editor status");
+        let rendered = format!("{report:?}");
+
+        assert!(rendered.contains("Editor `false` failed with exit status 1"));
+    }
 }

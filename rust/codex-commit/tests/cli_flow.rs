@@ -210,6 +210,8 @@ fn installed_schema_path_is_passed_to_codex_exec() {
         captured_schema.trim(),
         expected_schema.display().to_string()
     );
+    let captured_model = fs::read_to_string(harness.model_capture_path()).expect("model capture");
+    assert_eq!(captured_model.trim(), "gpt-5.4-mini");
 
     let captured_prompt =
         fs::read_to_string(harness.prompt_capture_path()).expect("prompt capture");
@@ -557,6 +559,7 @@ if [ "$1" != "exec" ]; then
 fi
 shift
 schema=""
+model=""
 output=""
 prompt=""
 while [ "$#" -gt 0 ]; do
@@ -568,6 +571,10 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     -c)
+      shift 2
+      ;;
+    -m|--model)
+      model="$2"
       shift 2
       ;;
     --output-schema)
@@ -596,6 +603,7 @@ if [ "${STUB_CODEX_STREAM_MODE:-}" = "1" ]; then
 fi
 cp "$STUB_PROPOSAL_FILE" "$output"
 printf '%s\n' "$schema" > "$STUB_SCHEMA_CAPTURE"
+printf '%s\n' "$model" > "${STUB_SCHEMA_CAPTURE}.model"
 printf '%s\n' "$prompt" > "${STUB_SCHEMA_CAPTURE}.prompt"
 echo "codex stub ran"
 "#,
@@ -637,6 +645,10 @@ echo "codex stub ran"
 
     fn prompt_capture_path(&self) -> PathBuf {
         self.root.path().join("schema-path.txt.prompt")
+    }
+
+    fn model_capture_path(&self) -> PathBuf {
+        self.root.path().join("schema-path.txt.model")
     }
 }
 

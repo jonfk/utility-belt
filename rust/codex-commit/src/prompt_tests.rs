@@ -16,9 +16,10 @@ fn builds_prompt_without_extra_context() {
     assert!(prompt.contains("package-lock.json"));
     assert!(prompt.contains("Cargo.lock"));
     assert!(prompt.contains("Avoid fully reading lockfiles and generated artifacts"));
-    assert!(prompt.contains(
-        "Use the user context to choose emphasis, wording, and likely commit scope"
-    ));
+    assert!(
+        prompt
+            .contains("Use the user context to choose emphasis, wording, and likely commit scope")
+    );
     assert!(!prompt.contains("\n---\n"));
     assert!(!prompt.contains("name: git-commit-proposal"));
     assert!(!prompt.contains("Additional user context"));
