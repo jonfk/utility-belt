@@ -6,12 +6,18 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 
 INSTALL_SOUND_DIR = Path.home() / ".local" / "share" / "codex-notify"
 REPO_SOUND_DIR = Path(__file__).resolve().with_name("codex-notify")
+DEFAULT_LOG_PATH = (
+    Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    / "codex-notify"
+    / "events.jsonl"
+)
 APP_SOUND_NAME = "scarlett-her-notify.wav"
 CLI_SOUND_NAME = "aoe-wololo-notify.mp3"
 FALLBACK_SOUND_NAME = "hal-9000-cant-do-that.wav"
@@ -62,7 +68,7 @@ def select_sound_for_client(client: str) -> Optional[str]:
     if "codex" in normalized and "desktop" in normalized:
         return APP_SOUND_NAME
 
-    if "codex" in normalized and "cli" in normalized:
+    if "codex" in normalized and ("tui" in normalized or "exec" in normalized):
         return CLI_SOUND_NAME
 
     return None
@@ -100,6 +106,29 @@ def select_sound(notification: dict, parent_command: str) -> Path:
     return sound_dir / sound_name
 
 
+def append_log(notification: dict, parent_command: str, sound_path: Path) -> None:
+    log_path_value = os.environ.get("CODEX_NOTIFY_LOG_PATH")
+    log_path = (
+        Path(log_path_value).expanduser()
+        if log_path_value
+        else DEFAULT_LOG_PATH
+    )
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "notification": notification,
+        "parent_command": parent_command,
+        "selected_sound": str(sound_path),
+    }
+
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True))
+            handle.write("\n")
+    except OSError:
+        return
+
+
 def play_sound(sound_path: Path) -> int:
     if not sound_path.exists():
         return 1
@@ -124,6 +153,7 @@ def main() -> int:
 
     parent_command = read_parent_command()
     sound_path = select_sound(notification, parent_command)
+    # append_log(notification, parent_command, sound_path)
     return play_sound(sound_path)
 
 
