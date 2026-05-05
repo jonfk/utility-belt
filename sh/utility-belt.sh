@@ -13,6 +13,7 @@ UTILITY_BELT_PROGRAMS=(
   prune-openapi
   start-ssh-proxy
   sync-github-keys
+  whos-listening-ports
   yt-transcript
 )
 

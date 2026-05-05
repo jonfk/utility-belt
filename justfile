@@ -28,6 +28,11 @@ install-sync-github-keys:
     mkdir -p ~/.local/bin
     ln -sf $(pwd)/sh/sync-github-keys.sh ~/.local/bin/sync-github-keys
 
+# Install whos-listening-ports script
+install-whos-listening-ports:
+    mkdir -p ~/.local/bin
+    ln -sf $(pwd)/sh/whos-listening-ports.sh ~/.local/bin/whos-listening-ports
+
 # Install organize-files-into-dirs-by-date script
 install-organize-files-into-dirs-by-date:
     mkdir -p ~/.local/bin
