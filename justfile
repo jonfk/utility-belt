@@ -10,6 +10,14 @@ install-git-worktree-utils:
 install-prune-openapi:
     cd python/prune-openapi && uv tool install --reinstall .
 
+# Install pi-docker using uv
+install-pi-docker:
+    cd python/pi-docker && uv tool install --reinstall .
+
+# Build the pi-docker Docker image
+build-pi-docker:
+    pi-docker build
+
 # Install git-smart-branch-delete using uv
 install-git-smart-branch-delete:
     cd python/git-smart-branch-delete && uv tool install --reinstall .

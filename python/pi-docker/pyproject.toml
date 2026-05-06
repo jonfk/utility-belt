@@ -1,0 +1,13 @@
+[project]
+name = "pi-docker"
+version = "0.1.0"
+description = "Run Pi inside a Docker container with host sessions and project paths mounted."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+pi-docker = "pi_docker.cli:main"
+
+[tool.setuptools.package-data]
+pi_docker = ["Dockerfile", "docker-entrypoint.sh"]

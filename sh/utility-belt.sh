@@ -10,6 +10,7 @@ UTILITY_BELT_PROGRAMS=(
   git-smart-push
   git-worktree-utils
   organize-files-into-dirs-by-date
+  pi-docker
   prune-openapi
   start-ssh-proxy
   sync-github-keys
