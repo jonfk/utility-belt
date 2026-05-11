@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-DEFAULT_IMAGE = "utility-belt/pi-docker:0.73.0"
-DEFAULT_PI_VERSION = "0.73.0"
+DEFAULT_IMAGE = "utility-belt/pi-docker:latest"
+DEFAULT_PI_VERSION = "0.73.1"
 DEFAULT_PI_PACKAGES = ("@ollama/pi-web-search",)
 DEFAULT_AGENT_STUFF_DIR = Path("/Users/jfokkan/Developer/jonfk_code/agent-stuff")
 DEFAULT_HOME_FILES = (

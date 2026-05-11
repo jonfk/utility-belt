@@ -21,8 +21,9 @@ Or from the repository root:
 just build-pi-docker
 ```
 
-The Dockerfile pins `@mariozechner/pi-coding-agent` to `0.73.0` by default.
-To update Pi, rebuild with a different version:
+By default, `pi-docker build` writes `utility-belt/pi-docker:latest`, and
+`pi-docker` runs that tag. To update Pi, rebuild with a different package
+version:
 
 ```sh
 pi-docker build --pi-version 0.74.0
