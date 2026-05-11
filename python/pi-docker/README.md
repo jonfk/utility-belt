@@ -59,6 +59,7 @@ The wrapper mounts:
 - `~/dotfiles` read-only, when present
 - common `.gitconfig*` and global gitignore files read-only, when present
 - `~/.agents` and project `.agents` read-only, when present
+- `/Users/jfokkan/Developer/jonfk_code/agent-stuff`, when present
 
 It also starts a local container bridge from `127.0.0.1:11434` to
 `host.docker.internal:11434`, so existing Pi Ollama configs can keep using

@@ -14,6 +14,7 @@ from typing import Sequence
 DEFAULT_IMAGE = "utility-belt/pi-docker:0.73.0"
 DEFAULT_PI_VERSION = "0.73.0"
 DEFAULT_PI_PACKAGES = ("@ollama/pi-web-search",)
+DEFAULT_AGENT_STUFF_DIR = Path("/Users/jfokkan/Developer/jonfk_code/agent-stuff")
 DEFAULT_HOME_FILES = (
     ".gitconfig",
     ".gitconfig.common",
@@ -263,6 +264,7 @@ def run_pi(args: argparse.Namespace, pi_args: Sequence[str], shell: bool = False
     if not args.no_agents:
         add_existing_mount(command, home / ".agents", readonly=True)
         add_existing_mount(command, cwd / ".agents", readonly=True)
+        add_existing_mount(command, DEFAULT_AGENT_STUFF_DIR)
 
     for env_name in ENV_ALLOWLIST:
         if env_name == "SSH_AUTH_SOCK" and not args.ssh_agent:
