@@ -57,11 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Saved session names to restore. Defaults to all saved sessions.",
     )
     restore_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print tmux commands without executing them.",
-    )
-    restore_parser.add_argument(
         "--kill-existing",
         action="store_true",
         help="Kill and recreate live sessions with matching names.",
@@ -128,7 +123,7 @@ def _edit(config_path: Path) -> int:
 
 def _restore(args: argparse.Namespace, config_path: Path) -> int:
     config = load_config(config_path)
-    client = TmuxClient(dry_run=args.dry_run)
+    client = TmuxClient()
     summary = restore_sessions(
         config,
         list(args.sessions),
@@ -137,14 +132,6 @@ def _restore(args: argparse.Namespace, config_path: Path) -> int:
         attach=args.attach,
         inside_tmux=bool(os.environ.get("TMUX")),
     )
-    if args.dry_run:
-        if client.dry_run_commands:
-            for command in client.dry_run_commands:
-                print(shlex.join(command))
-        else:
-            print("No tmux commands would be run.")
-        return 0
-
     for session_name in summary.skipped_existing:
         print(f"Skipped existing session: {session_name}")
     for session_name in summary.restored:

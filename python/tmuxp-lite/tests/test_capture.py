@@ -36,9 +36,11 @@ def test_config_from_live_state_saves_simple_pane_group() -> None:
 
     window = config_from_live_state(state).sessions["alpha"].windows[0]
 
+    assert window.cwd is None
     assert window.panes is not None
     assert window.panes.orientation == "horizontal"
     assert [pane.command for pane in window.panes.items] == [None, "htop"]
+    assert [pane.cwd for pane in window.panes.items] == ["/repo", "/repo"]
 
 
 def test_infer_orientation_from_tmux_layout_container() -> None:

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 @dataclass(slots=True)
 class PaneSpec:
-    cwd: str | None = None
+    cwd: str
     command: str | None = None
 
     @classmethod
@@ -16,7 +16,7 @@ class PaneSpec:
             raise ValueError(f"{path} must be a mapping")
         _reject_unknown(data, {"cwd", "command"}, path)
         return cls(
-            cwd=_optional_str(data.get("cwd"), f"{path}.cwd"),
+            cwd=_required_str(data.get("cwd"), f"{path}.cwd"),
             command=_optional_str(data.get("command"), f"{path}.command"),
         )
 
@@ -75,6 +75,8 @@ class WindowSpec:
             panes = PaneGroupSpec.from_dict(data["panes"], path=f"{path}.panes")
         if panes and data.get("command") is not None:
             raise ValueError(f"{path} cannot set both command and panes")
+        if panes and data.get("cwd") is not None:
+            raise ValueError(f"{path} cannot set both cwd and panes")
         return cls(
             name=_required_str(data.get("name"), f"{path}.name"),
             cwd=_optional_str(data.get("cwd"), f"{path}.cwd"),

@@ -41,25 +41,12 @@ class CommandResult:
 
 
 class TmuxClient:
-    def __init__(self, *, dry_run: bool = False) -> None:
-        self.dry_run = dry_run
-        self.dry_run_commands: list[list[str]] = []
-        self._fake_window_counter = 0
-        self._fake_pane_counter = 0
-
     def require_tmux(self) -> None:
-        if self.dry_run:
-            return
         if shutil.which("tmux") is None:
             raise TmuxError("Required binary not found in PATH: tmux")
 
     def run(self, args: Sequence[str], *, check: bool = True) -> CommandResult:
         command = ["tmux", *args]
-        if self.dry_run:
-            self.dry_run_commands.append(command)
-            if args and args[0] == "has-session":
-                return CommandResult(stdout="", stderr="", returncode=1)
-            return CommandResult(stdout="", stderr="", returncode=0)
         try:
             result = subprocess.run(
                 command,
@@ -104,8 +91,6 @@ class TmuxClient:
         if cwd:
             args.extend(["-c", cwd])
         result = self.run(args)
-        if self.dry_run:
-            return self._next_fake_window(), self._next_fake_pane()
         return parse_id_pair(result.stdout)
 
     def new_window(self, session_name: str, window_name: str, cwd: str | None) -> tuple[str, str]:
@@ -113,8 +98,6 @@ class TmuxClient:
         if cwd:
             args.extend(["-c", cwd])
         result = self.run(args)
-        if self.dry_run:
-            return self._next_fake_window(), self._next_fake_pane()
         return parse_id_pair(result.stdout)
 
     def split_window(self, target_window_id: str, orientation: str, cwd: str | None) -> str:
@@ -128,12 +111,10 @@ class TmuxClient:
         if cwd:
             args.extend(["-c", cwd])
         result = self.run(args)
-        if self.dry_run:
-            return self._next_fake_pane()
         return result.stdout.strip()
 
-    def send_command(self, pane_id: str, command: str) -> None:
-        self.run(["send-keys", "-t", pane_id, command, "C-m"])
+    def send_prompt_text(self, pane_id: str, text: str) -> None:
+        self.run(["send-keys", "-l", "-t", pane_id, text])
 
     def select_pane(self, pane_id: str) -> None:
         self.run(["select-pane", "-t", pane_id])
@@ -146,14 +127,6 @@ class TmuxClient:
             self.run(["switch-client", "-t", session_name])
         else:
             self.run(["attach-session", "-t", session_name])
-
-    def _next_fake_window(self) -> str:
-        self._fake_window_counter += 1
-        return f"@dry{self._fake_window_counter}"
-
-    def _next_fake_pane(self) -> str:
-        self._fake_pane_counter += 1
-        return f"%dry{self._fake_pane_counter}"
 
 
 def parse_sessions(output: str) -> list[str]:

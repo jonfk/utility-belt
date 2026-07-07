@@ -7,8 +7,8 @@ Status: Draft
 `tmuxp-lite` is a small Python CLI for saving and restoring multiple tmux
 sessions from one compact YAML file. It targets the subset of tmuxp behavior
 that matters for lightweight personal sessions: session names, ordered windows,
-working directories, the foreground command or process, and coarse pane
-orientation.
+working directories, the foreground command or process as a non-executing prompt
+hint, and coarse pane orientation.
 
 The proposed design stores all managed sessions in a single human-editable file
 under the user's config directory. The tool captures all current tmux sessions
@@ -40,8 +40,8 @@ for personal tmux usage.
 - Save all managed sessions in one YAML file.
 - Capture all currently running tmux sessions by default.
 - Restore all saved sessions by default, or restore selected named sessions.
-- Represent sessions, ordered windows, working directories, shell commands or
-  foreground processes, and simple pane orientation.
+- Represent sessions, ordered windows, working directories, shell command or
+  foreground process hints, and simple pane orientation.
 - Preserve configured window order during restore.
 - Keep pane restore behavior simple and predictable.
 - Use Python with `uv`-managed packaging, following the repo's Python tooling
@@ -106,7 +106,6 @@ Pane support stays deliberately coarse:
     root: ~/repos/infra
     windows:
       - name: ops
-        cwd: ~/repos/infra
         panes:
           orientation: horizontal
           items:
@@ -119,9 +118,15 @@ Session names are the stable identity. Renaming a session is treated as removing
 one saved session and adding another. Window order is the order in the YAML list
 and should be preserved during restore.
 
-If a window has no `panes`, it is restored as one pane. If it has panes, the
-tool creates one split per additional pane using either `horizontal` or
-`vertical`. It does not try to preserve pane sizes or nested layouts.
+If a window has no `panes`, it is restored as one pane using the window `cwd` or
+session `root`. If it has panes, each pane item must include its own `cwd`; the
+tool creates the initial pane from the first pane item and one split per
+additional pane using either `horizontal` or `vertical`. It does not try to
+preserve pane sizes or nested layouts.
+
+The `command` field is a prompt hint, not an automatic command runner. Restore
+types the configured text into the pane without pressing Enter. This makes
+lossy captured process names visible while leaving execution under user control.
 
 ## Functional Design
 
@@ -178,18 +183,19 @@ Restore should be conservative:
 - If a target session already exists, skip it by default.
 - `--attach` attaches or switches the client to the restored session.
 - `--kill-existing` explicitly kills and recreates a conflicting session.
-- `--dry-run` prints planned tmux commands without executing them.
 
 Window restore:
 
 - Create the session with the first configured window.
 - Create remaining windows with configured names and directories in YAML order.
-- Run configured commands through tmux `send-keys` after pane creation unless a
-  simpler tmux-native command path is clearly more reliable.
+- Type configured command hints through tmux `send-keys -l` after pane creation
+  without pressing Enter.
 
 Pane restore:
 
 - Create panes in listed order.
+- Use each pane item's required `cwd`; pane-group windows do not also set a
+  window-level `cwd`.
 - Use one orientation for the window.
 - Focus the first pane after creation.
 - Do not attempt exact pane dimensions.
@@ -240,9 +246,10 @@ Suggested model:
 
 - `Config`: version and session map.
 - `SessionSpec`: name, root, ordered windows.
-- `WindowSpec`: name, cwd, command, panes.
+- `WindowSpec`: name, cwd, command, panes. `cwd` and `command` apply only to
+  single-pane windows.
 - `PaneGroupSpec`: orientation and items.
-- `PaneSpec`: cwd and command.
+- `PaneSpec`: required cwd and optional command hint.
 - `LiveSession`, `LiveWindow`, `LivePane`: parsed tmux state.
 
 The config model should preserve unknown future fields only if that can be done
@@ -254,7 +261,6 @@ errors.
 Create one subprocess adapter around `tmux`:
 
 - executes commands with consistent error handling
-- supports `--dry-run`
 - emits machine-readable tmux format strings using a delimiter unlikely to
   appear in names or paths
 - validates that tmux is installed and that a server is available for capture
@@ -270,13 +276,15 @@ There are three possible levels of command capture:
 - process-name: save `pane_current_command`
 - full-command best effort: inspect OS process tables for command arguments
 
-The proposed first version uses shell-only plus process-name capture. Full
+The proposed first version uses shell-only plus process-name capture. Captured
+process names are restored only as prompt hints, not executed commands. Full
 command-line capture can be added later behind a flag if it proves worth the
 platform-specific complexity.
 
-This means a captured `nvim` pane might restore as `nvim`, not necessarily
-`nvim some/file.md`. That limitation is acceptable for the first version if the
-file remains easy to edit.
+This means a captured `nvim` pane might restore with `nvim` sitting at the
+prompt, not necessarily `nvim some/file.md`, and the user chooses whether to run
+or edit it. That limitation is acceptable for the first version if the file
+remains easy to edit.
 
 ## Alternatives Considered
 
@@ -325,8 +333,9 @@ configuration.
 - YAML is pleasant to edit but can surprise users with implicit scalar parsing.
 - Replace-only capture is simple, but manual edits for non-live sessions are
   lost if the user captures over the file.
-- Sending commands with `send-keys` is simple but can behave differently from
-  starting commands as tmux pane commands.
+- Sending command hints with `send-keys -l` leaves execution under user control
+  but requires pressing Enter manually for commands the user actually wants to
+  run.
 - Restoring all sessions by default is convenient, but it can create more
   sessions than intended if the config file has grown stale.
 - Coarse pane orientation intentionally loses layout detail.
@@ -343,10 +352,10 @@ as exact CLI option names and error wording can be settled during implementation
    `edit`.
 3. Implement tmux live-state querying for capture.
 4. Implement replace-only `capture`.
-5. Implement conservative `restore` with `--dry-run`, conflict detection, and
-   one-pane windows.
+5. Implement conservative `restore` with conflict detection and one-pane
+   windows.
 6. Add simple pane restore with horizontal/vertical split support.
 7. Add focused tests for config parsing, capture writing, tmux output parsing,
-   and dry-run restore planning.
+   and restore planning.
 8. Add install recipe to the root `justfile` and register the active program in
    `sh/utility-belt.sh` if the design is accepted.

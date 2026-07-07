@@ -71,7 +71,6 @@ def _window_from_live(window: LiveWindow, panes: list[LivePane]) -> WindowSpec:
         )
     return WindowSpec(
         name=window.name,
-        cwd=first_pane.cwd,
         panes=PaneGroupSpec(
             orientation=infer_orientation(window.layout),
             items=[

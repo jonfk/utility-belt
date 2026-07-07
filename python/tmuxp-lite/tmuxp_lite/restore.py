@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from .config import expand_runtime_path
 from .exceptions import ConfigError
-from .models import Config, PaneSpec, SessionSpec, WindowSpec
+from .models import Config, SessionSpec, WindowSpec
 from .tmux import TmuxClient
 
 
@@ -54,10 +54,11 @@ def _restore_session(session: SessionSpec, client: TmuxClient) -> None:
         raise ConfigError(f"Session has no windows: {session.name}")
 
     first_window = session.windows[0]
+    first_window_cwd = _initial_window_cwd(first_window, session)
     first_window_id, first_pane_id = client.new_session(
         session.name,
         first_window.name,
-        _cwd(first_window, session),
+        first_window_cwd,
     )
     _restore_window_content(
         first_window,
@@ -68,10 +69,11 @@ def _restore_session(session: SessionSpec, client: TmuxClient) -> None:
     )
 
     for window in session.windows[1:]:
+        window_cwd = _initial_window_cwd(window, session)
         window_id, pane_id = client.new_window(
             session.name,
             window.name,
-            _cwd(window, session),
+            window_cwd,
         )
         _restore_window_content(
             window,
@@ -93,7 +95,6 @@ def _restore_window_content(
     first_pane_id: str,
 ) -> None:
     pane_ids: list[str] = [first_pane_id]
-    pane_specs: list[PaneSpec]
     if window.panes:
         pane_specs = window.panes.items
         for pane in pane_specs[1:]:
@@ -101,22 +102,27 @@ def _restore_window_content(
                 client.split_window(
                     window_id,
                     window.panes.orientation,
-                    expand_runtime_path(pane.cwd, fallback=_cwd(window, session)),
+                    expand_runtime_path(pane.cwd),
                 )
             )
-    else:
-        pane_specs = [
-            PaneSpec(
-                cwd=window.cwd,
-                command=window.command,
-            )
+        prompt_hints = [
+            (pane_id, pane.command)
+            for pane_id, pane in zip(pane_ids, pane_specs)
         ]
+    else:
+        prompt_hints = [(first_pane_id, window.command)]
 
-    for pane_id, pane in zip(pane_ids, pane_specs):
-        if pane.command:
-            client.send_command(pane_id, pane.command)
+    for pane_id, command in prompt_hints:
+        if command:
+            client.send_prompt_text(pane_id, command)
 
     client.select_pane(first_pane_id)
+
+
+def _initial_window_cwd(window: WindowSpec, session: SessionSpec) -> str | None:
+    if window.panes:
+        return expand_runtime_path(window.panes.items[0].cwd)
+    return _cwd(window, session)
 
 
 def _cwd(window: WindowSpec, session: SessionSpec) -> str | None:

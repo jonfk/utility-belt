@@ -9,6 +9,7 @@ The first version intentionally keeps the model small:
 - `restore` skips sessions that already exist unless `--kill-existing` is used
 - windows are restored in YAML order
 - pane layouts are restored only as simple horizontal or vertical splits
+- captured commands are typed as prompt hints, not executed automatically
 
 ## Usage
 
@@ -17,7 +18,7 @@ tmuxp-lite capture
 tmuxp-lite list
 tmuxp-lite edit
 tmuxp-lite restore
-tmuxp-lite restore utility-belt --dry-run
+tmuxp-lite restore utility-belt
 ```
 
 The default config path is:
