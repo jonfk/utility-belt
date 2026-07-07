@@ -14,6 +14,10 @@ install-prune-openapi:
 install-pi-docker:
     cd python/pi-docker && uv tool install --reinstall .
 
+# Install tmuxp-lite using uv
+install-tmuxp-lite:
+    cd python/tmuxp-lite && uv tool install --reinstall .
+
 # Build the pi-docker Docker image
 build-pi-docker:
     pi-docker build
