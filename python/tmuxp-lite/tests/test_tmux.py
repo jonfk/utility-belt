@@ -13,6 +13,18 @@ def test_parse_windows_reads_machine_formatted_tmux_output() -> None:
     assert windows[0].layout == "abc,80x24,0,0"
 
 
+def test_parse_windows_reads_tmux_escaped_field_separators() -> None:
+    output = r"10\0371\037zsh\03768f8,186x58,0,0,19" + "\n"
+
+    windows = parse_windows(output)
+
+    assert len(windows) == 1
+    assert windows[0].session_name == "10"
+    assert windows[0].index == 1
+    assert windows[0].name == "zsh"
+    assert windows[0].layout == "68f8,186x58,0,0,19"
+
+
 def test_parse_panes_reads_machine_formatted_tmux_output() -> None:
     output = FIELD_SEP.join(("alpha", "1", "0", "/tmp/project", "nvim", "1")) + "\n"
 

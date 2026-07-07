@@ -11,6 +11,7 @@ from .exceptions import TmuxError
 from .models import LivePane, LiveState, LiveWindow
 
 FIELD_SEP = "\x1f"
+ESCAPED_FIELD_SEP = r"\037"
 SESSION_FORMAT = "#{session_name}"
 WINDOW_FORMAT = FIELD_SEP.join(
     (
@@ -181,6 +182,8 @@ def parse_id_pair(output: str) -> tuple[str, str]:
 
 def _split_fields(line: str, expected: int, label: str) -> list[str]:
     fields = line.split(FIELD_SEP)
+    if len(fields) != expected and ESCAPED_FIELD_SEP in line:
+        fields = line.split(ESCAPED_FIELD_SEP)
     if len(fields) != expected:
         raise TmuxError(f"Unexpected {label} output from tmux: {line!r}")
     return fields
