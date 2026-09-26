@@ -1,6 +1,12 @@
+const extensionApi = globalThis.browser ?? globalThis.chrome;
+// Chrome also exposes `browser`; identify our Firefox build by its manifest.
+const isFirefox = Boolean(
+  extensionApi.runtime.getManifest().browser_specific_settings?.gecko,
+);
+
 // Create the right-click menu on install
-browser.runtime.onInstalled.addListener(() => {
-  browser.contextMenus.create({
+extensionApi.runtime.onInstalled.addListener(() => {
+  extensionApi.contextMenus.create({
     id: "trigger-vid-dl",
     title: "Trigger Vid DL",
     contexts: ["page", "video"], // show on page or when right-clicking a <video>
@@ -8,11 +14,11 @@ browser.runtime.onInstalled.addListener(() => {
 });
 
 // When clicked, inject a tiny extractor in the page
-browser.contextMenus.onClicked.addListener(async (info, tab) => {
+extensionApi.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== "trigger-vid-dl" || !tab?.id) return;
 
   try {
-    const [{ result }] = await browser.scripting.executeScript({
+    const [{ result }] = await extensionApi.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
         // --- runs in the page ---
@@ -90,13 +96,26 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
       return;
     }
 
-    // Kick off the real browser download (uses session/Container cookies)
-    await browser.downloads.download({
+    // Both browsers use their current profile's cookies. Firefox can additionally
+    // associate the download with the tab's Container cookie store.
+    const downloadOptions = {
       url: result.url,
-      filename: result.filename,
       saveAs: true,
-      cookieStoreId: tab.cookieStoreId, // Firefox-only; keeps Container auth
-    });
+    };
+
+    // Chromium resolves an extension-supplied filename relative to the default
+    // Downloads directory, which also resets the Save As dialog to that folder.
+    // Omitting it lets Chromium use the browser's last Save As directory.
+    // Firefox remembers a per-extension Save As directory even with a filename.
+    if (isFirefox) {
+      downloadOptions.filename = result.filename;
+    }
+
+    if (tab.cookieStoreId) {
+      downloadOptions.cookieStoreId = tab.cookieStoreId;
+    }
+
+    await extensionApi.downloads.download(downloadOptions);
   } catch (err) {
     console.error("[Trigger Vid DL] failed:", err);
   }

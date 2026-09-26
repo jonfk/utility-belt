@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "video-downloader-ext",
+  "version": "1.0.0",
+  "description": "Download videos from web pages while preserving authentication cookies",
+  "permissions": [
+    "contextMenus",
+    "downloads",
+    "scripting",
+    "activeTab"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
