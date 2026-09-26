@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -41,8 +42,7 @@ def find_pull_new_url(command_output: str) -> Optional[str]:
     return match.group(0).rstrip(".,;:)]}>'\"")
 
 
-def confirm_open_url(url: str) -> bool:
-    print(f"Detected pull request URL: {url}")
+def confirm_open_url() -> bool:
     try:
         answer = input("Open this URL in browser? [Y/n] ")
     except EOFError:
@@ -55,18 +55,18 @@ def confirm_open_url(url: str) -> bool:
     return normalized in {"", "y", "yes"}
 
 
-def open_url(url: str) -> None:
-    if shutil.which("open") is None:
-        print("Cannot open URL automatically because 'open' was not found in PATH.", file=sys.stderr)
+def open_url(opener: str, url: str) -> None:
+    try:
+        result = subprocess.run([opener, url], text=True, capture_output=True, check=False)
+    except OSError as error:
+        print(f"Failed to open URL: {error}", file=sys.stderr)
         return
-
-    result = subprocess.run(["open", url], text=True, capture_output=True, check=False)
     if result.returncode == 0:
         return
 
     details = (result.stderr or result.stdout or "").strip()
     if not details:
-        details = f"open exited with code {result.returncode}"
+        details = f"{opener} exited with code {result.returncode}"
     print(f"Failed to open URL: {details}", file=sys.stderr)
 
 
@@ -82,8 +82,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     command_output = echo_git_output(push_result)
     pull_new_url = find_pull_new_url(command_output)
 
-    if pull_new_url and confirm_open_url(pull_new_url):
-        open_url(pull_new_url)
+    if pull_new_url:
+        print(f"Detected pull request URL: {pull_new_url}")
+        opener = os.environ.get("GIT_OPEN_CMD")
+        if opener and shutil.which(opener) and confirm_open_url():
+            open_url(opener, pull_new_url)
 
     return push_result.returncode
 
